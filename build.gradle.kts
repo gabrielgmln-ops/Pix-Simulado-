@@ -53,6 +53,10 @@ dependencies {
     // --- Documentação OpenAPI / Swagger UI ---
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.13")
 
+    // --- QR Code: geração e leitura de imagens PNG ---
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:javase:3.5.3")
+
     // --- Gera metadados das @ConfigurationProperties (autocompletar no IDE) ---
     annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
 

@@ -15,7 +15,7 @@ JUnit 5 · Testcontainers · Docker Compose · GitHub Actions
 |------:|--------|--------|
 | 0 | Setup do projeto, infraestrutura e convenções | ✅ |
 | 1 | Cadastro e validação de chaves Pix (CPF, e-mail, aleatória) | ✅ |
-| 2 | Geração e leitura de QR Code (payload EMV simplificado) | ⏳ |
+| 2 | Geração e leitura de QR Code (payload EMV simplificado) | ✅ |
 | 3 | Transferência instantânea via Ledger com idempotência por EndToEndId | ⏳ |
 | 4 | Devolução (lançamento inverso, original preservado) | ⏳ |
 | 5 | Swagger completo, testes, cobertura e CI | ⏳ |
@@ -74,6 +74,33 @@ Regras aplicadas:
 
 Erros seguem o RFC 9457 e trazem um `codigo` estável: `400` formato inválido · `404` não encontrada · `409` já cadastrada · `422` regra violada.
 
+## API - QR Code (Etapa 2)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `POST` | `/api/v1/qrcodes` | Gera um BR Code estático para uma chave ativa e devolve o payload e o PNG em Base64 |
+| `GET` | `/api/v1/qrcodes/imagem?payload=&tamanho=` | Renderiza um payload válido como `image/png` |
+| `POST` | `/api/v1/qrcodes/leitura` | Lê um payload em texto (Pix Copia e Cola) |
+| `POST` | `/api/v1/qrcodes/leitura/imagem` | Lê um QR Code enviado como imagem PNG ou JPEG (multipart, campo `arquivo`) |
+
+```bash
+curl -X POST localhost:8080/api/v1/qrcodes -H 'Content-Type: application/json' \
+  -d '{"chave": "fulano.sintetico@exemplo.com", "valor": 25.90, "txid": "PEDIDO123"}'
+```
+
+<img src="docs/exemplo-qrcode.png" width="180" alt="QR Code de exemplo">
+
+```
+00020126620014br.gov.bcb.pix0126loja.sintetica@exemplo.com0210Pedido 123520400005303986540525.905802BR5919Loja Sintetica Ltda6009SAO PAULO62130509PEDIDO12363045AB5
+```
+
+O payload segue o padrão EMV (TLV) do BR Code estático. Os campos 00, 26 (GUI `br.gov.bcb.pix`, chave e descrição), 52, 53, 54, 58, 59, 60, 62 (txid) e 63 (CRC16-CCITT-FALSE) foram validados contra o exemplo oficial do manual do Bacen.
+
+- **Valor**: `BigDecimal` com 2 casas. Um valor com mais casas é **recusado**, nunca arredondado.
+- **Texto**: o nome e a cidade perdem os acentos (o BR Code é ASCII) e são cortados em 25 e 15 caracteres.
+- **Leitura**: a leitura confere o CRC, então um QR adulterado é rejeitado com `QRCODE_CRC_INVALIDO`. Ela não restringe o tipo da chave, porque QRs de outras instituições podem trazer telefone ou CNPJ.
+- **Fora do escopo**: QR dinâmico (campo 25, cobrança por URL).
+
 ## Testes
 
 ```bash
@@ -114,6 +141,7 @@ src/main/kotlin/br/com/pixsimulado/
 ├── PixSimuladoApplication.kt
 ├── config/          # propriedades, OpenAPI, Clock
 ├── chave/           # Etapa 1: domínio, serviço e API de chaves Pix
+├── qrcode/          # Etapa 2: BR Code (EMV/TLV, CRC16) e imagem PNG (ZXing)
 └── shared/
     ├── domain/      # exceções de negócio (sealed)
     └── web/         # tratamento global de erros
