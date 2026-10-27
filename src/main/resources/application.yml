@@ -53,6 +53,8 @@ pix:
   ispb: ${PIX_ISPB:99999999}
   nome-instituicao: ${PIX_NOME_INSTITUICAO:PIX SIMULADO SA}
   cidade: ${PIX_CIDADE:SAO PAULO}
+  chaves:
+    limite-por-conta: ${PIX_LIMITE_CHAVES_POR_CONTA:5}
   ledger:
     base-url: ${LEDGER_BASE_URL:http://localhost:8081}
     api-key: ${LEDGER_API_KEY}

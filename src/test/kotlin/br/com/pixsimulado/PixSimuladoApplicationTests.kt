@@ -3,27 +3,16 @@ package br.com.pixsimulado
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.client.TestRestTemplate
-import org.springframework.context.annotation.Import
 import org.springframework.http.HttpStatus
-import org.springframework.test.context.ActiveProfiles
-import org.testcontainers.junit.jupiter.Testcontainers
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
  * Teste de fumaça da Etapa 0: a aplicação sobe por completo contra um PostgreSQL real,
  * o Flyway aplica as migrações e os endpoints de infraestrutura respondem.
- *
- * disabledWithoutDocker = true: em máquinas sem Docker o teste é ignorado (não falha);
- * no CI (Etapa 5) o Docker estará sempre disponível.
  */
-@Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration::class)
-@ActiveProfiles("test")
-class PixSimuladoApplicationTests {
+class PixSimuladoApplicationTests : IntegrationTest() {
 
     @Autowired
     lateinit var rest: TestRestTemplate
@@ -39,9 +28,9 @@ class PixSimuladoApplicationTests {
     }
 
     @Test
-    fun `flyway aplica a migracao baseline`() {
+    fun `flyway aplica todas as migracoes`() {
         val aplicadas = flyway.info().applied().map { it.version.version }
-        assertTrue("1" in aplicadas, "Migração V1 deveria estar aplicada; aplicadas=$aplicadas")
+        assertTrue(aplicadas.containsAll(listOf("1", "2")), "Migrações esperadas não aplicadas; aplicadas=$aplicadas")
     }
 
     @Test

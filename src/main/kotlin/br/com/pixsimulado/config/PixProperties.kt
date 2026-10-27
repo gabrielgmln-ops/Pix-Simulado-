@@ -1,5 +1,7 @@
 package br.com.pixsimulado.config
 
+import jakarta.validation.Valid
+import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -12,6 +14,7 @@ import org.springframework.validation.annotation.Validated
  *                (compõe o EndToEndId na Etapa 3). Valor sintético.
  * @property nomeInstituicao nome exibido em comprovantes e no payload do QR Code.
  * @property cidade cidade do recebedor, campo obrigatório do payload EMV (Etapa 2).
+ * @property chaves regras do cadastro de chaves.
  */
 @Validated
 @ConfigurationProperties(prefix = "pix")
@@ -20,4 +23,13 @@ data class PixProperties(
     val ispb: String,
     @field:NotBlank val nomeInstituicao: String,
     @field:NotBlank val cidade: String,
-)
+    @field:Valid val chaves: Chaves = Chaves(),
+) {
+    /**
+     * @property limitePorConta máximo de chaves ATIVAS por conta. O regulamento do Pix
+     *           fixa 5 para pessoa física (20 para jurídica, fora do escopo).
+     */
+    data class Chaves(
+        @field:Min(1) val limitePorConta: Int = 5,
+    )
+}
