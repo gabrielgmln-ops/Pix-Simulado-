@@ -1,0 +1,74 @@
+# ============================================================================
+# Pix Simulado - configuração base
+# Toda informação sensível ou dependente de ambiente vem de variável de ambiente.
+# Sintaxe ${VAR:padrao} -> usa o padrão apenas quando a variável não existe.
+# Segredos (senha do banco, chave da Ledger) NÃO possuem padrão: se faltarem,
+# a aplicação falha na inicialização, o que é o comportamento desejado.
+# ============================================================================
+spring:
+  application:
+    name: pix-simulado
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:pix}
+    username: ${DB_USER:pix}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+
+  jpa:
+    # O schema é responsabilidade exclusiva do Flyway; o Hibernate apenas valida.
+    hibernate:
+      ddl-auto: validate
+    # Evita consultas ao banco durante a renderização da resposta HTTP.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  mvc:
+    # Erros do Spring MVC no formato Problem Details (RFC 9457).
+    problemdetails:
+      enabled: true
+
+  jackson:
+    # BigDecimal serializado como número exato, sem notação científica.
+    generator:
+      write-bigdecimal-as-plain: true
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful   # conclui requisições em andamento antes de encerrar
+
+pix:
+  # Dados sintéticos da instituição simulada.
+  ispb: ${PIX_ISPB:99999999}
+  nome-instituicao: ${PIX_NOME_INSTITUICAO:PIX SIMULADO SA}
+  cidade: ${PIX_CIDADE:SAO PAULO}
+  ledger:
+    base-url: ${LEDGER_BASE_URL:http://localhost:8081}
+    api-key: ${LEDGER_API_KEY}
+    connect-timeout: ${LEDGER_CONNECT_TIMEOUT:2s}
+    read-timeout: ${LEDGER_READ_TIMEOUT:5s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true   # /actuator/health/liveness e /readiness
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

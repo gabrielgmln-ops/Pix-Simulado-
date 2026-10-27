@@ -1,0 +1,53 @@
+# ============================================================================
+# Ambiente local do Pix Simulado.
+#   docker compose up -d db        -> apenas o banco (rodar a app pela IDE/Gradle)
+#   docker compose up -d --build   -> banco + aplicação
+# Variáveis lidas do arquivo .env (copie de .env.example). Sem .env, o compose
+# falha de propósito nos segredos obrigatórios (sintaxe ${VAR:?mensagem}).
+# ============================================================================
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pix-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-pix}
+      POSTGRES_USER: ${DB_USER:-pix}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD no arquivo .env}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pix-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    container_name: pix-app
+    depends_on:
+      db:
+        condition: service_healthy   # só sobe quando o Postgres aceita conexões
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-pix}
+      DB_USER: ${DB_USER:-pix}
+      DB_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD no arquivo .env}
+      # A Ledger API roda fora deste compose; por padrão, na máquina hospedeira.
+      LEDGER_BASE_URL: ${LEDGER_BASE_URL:-http://host.docker.internal:8081}
+      LEDGER_API_KEY: ${LEDGER_API_KEY:?defina LEDGER_API_KEY no arquivo .env}
+      PIX_ISPB: ${PIX_ISPB:-99999999}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # necessário no Linux
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness | grep -q UP"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  pix-db-data:
