@@ -3,6 +3,7 @@ package br.com.pixsimulado.ledger
 import br.com.pixsimulado.config.LedgerProperties
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.stereotype.Component
@@ -35,6 +36,9 @@ sealed interface ResultadoLedger {
     /** Timeout, falha de rede, 401, 5xx ou resposta inesperada: resultado desconhecido. */
     data class Indeterminada(val motivo: String) : ResultadoLedger
 }
+
+/** Resposta da Ledger à pergunta "este cliente pode usar esta conta?". */
+enum class AcessoConta { PERMITIDO, NAO_AUTENTICADO, NEGADO, INDISPONIVEL }
 
 /**
  * Cliente HTTP da Ledger API.
@@ -85,6 +89,32 @@ class LedgerClient(
             // Inclui timeout de leitura: a Ledger pode ter recebido e processado o pedido.
             log.warn("Ledger sem resposta para idempotencyKey={}: {}", idempotencyKey, e.message)
             ResultadoLedger.Indeterminada("Ledger indisponível ou sem resposta no prazo")
+        }
+
+    /**
+     * Pergunta à Ledger, COM A CREDENCIAL DO CLIENTE, se ele enxerga a conta.
+     *
+     * A Ledger (Operação Cofre) só mostra a um CLIENTE as contas de que ele é dono e
+     * responde 404 para as alheias (anti-enumeração). Reaproveitamos essa regra em vez
+     * de duplicar no Pix um cadastro de "quem é dono de qual conta".
+     * O cabeçalho Authorization do cliente é repassado como veio e nunca é logado.
+     */
+    fun verificarAcesso(autorizacaoCliente: String, contaId: UUID): AcessoConta =
+        try {
+            rest.get()
+                .uri("/api/v1/contas/{id}", contaId)
+                .headers { it.set(HttpHeaders.AUTHORIZATION, autorizacaoCliente) } // substitui o Basic do OPERADOR
+                .exchange { _, resposta ->
+                    when (resposta.statusCode.value()) {
+                        in 200..299 -> AcessoConta.PERMITIDO
+                        401 -> AcessoConta.NAO_AUTENTICADO
+                        403, 404 -> AcessoConta.NEGADO
+                        else -> AcessoConta.INDISPONIVEL
+                    }
+                } ?: AcessoConta.INDISPONIVEL
+        } catch (e: ResourceAccessException) {
+            log.warn("Ledger sem resposta na verificação de acesso à conta {}: {}", contaId, e.message)
+            AcessoConta.INDISPONIVEL
         }
 
     private fun classificar(status: Int, corpo: ByteArray): ResultadoLedger {

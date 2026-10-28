@@ -8,21 +8,27 @@ import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.equalToJson
 import com.github.tomakehurst.wiremock.client.WireMock.exactly
+import com.github.tomakehurst.wiremock.client.WireMock.get
+import com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor
+import com.github.tomakehurst.wiremock.client.WireMock.okJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
+import com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActionsDsl
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -44,7 +50,7 @@ class PagamentoPixApiTest : IntegrationTest() {
 
     @BeforeEach
     fun preparar() {
-        ledger.resetAll()
+        reiniciarLedger()
         jdbc.execute("TRUNCATE chave_pix, pagamento_pix")
         mvc.post("/api/v1/chaves") {
             contentType = MediaType.APPLICATION_JSON
@@ -93,7 +99,7 @@ class PagamentoPixApiTest : IntegrationTest() {
         val e2e = novoEndToEndId()
         pagar(e2e, chave = CHAVE_LOJA, valor = "10")
 
-        mvc.get("/api/v1/pagamentos/{e2e}", e2e).andExpect {
+        mvc.get("/api/v1/pagamentos/{e2e}", e2e) { header(HttpHeaders.AUTHORIZATION, CRED_CLIENTE) }.andExpect {
             status { isOk() }
             jsonPath("$.estado") { value("LIQUIDADO") }
             jsonPath("$.valor") { value(10.00) }
@@ -102,7 +108,7 @@ class PagamentoPixApiTest : IntegrationTest() {
 
     @Test
     fun `consulta de pagamento inexistente devolve 404`() {
-        mvc.get("/api/v1/pagamentos/{e2e}", "E99999999202610281530aBcDeFgHiJk").andExpect {
+        mvc.get("/api/v1/pagamentos/{e2e}", "E99999999202610281530aBcDeFgHiJk") { header(HttpHeaders.AUTHORIZATION, CRED_CLIENTE) }.andExpect {
             status { isNotFound() }
             jsonPath("$.codigo") { value("PAGAMENTO_NAO_ENCONTRADO") }
         }
@@ -177,7 +183,7 @@ class PagamentoPixApiTest : IntegrationTest() {
         }
 
         ledger.verify(exactly(1), postRequestedFor(urlEqualTo(ROTA_LEDGER)))
-        mvc.get("/api/v1/pagamentos/{e2e}", e2e).andExpect {
+        mvc.get("/api/v1/pagamentos/{e2e}", e2e) { header(HttpHeaders.AUTHORIZATION, CRED_CLIENTE) }.andExpect {
             jsonPath("$.estado") { value("REJEITADO") }
             jsonPath("$.motivo.codigo") { value("SALDO_INSUFICIENTE") }
         }
@@ -211,13 +217,13 @@ class PagamentoPixApiTest : IntegrationTest() {
         assertEquals(0, reconciliacao.executar())
 
         // A Ledger volta ao normal; simulamos que o intervalo já passou.
-        ledger.resetAll()
+        reiniciarLedger()
         ledgerResponde(201, transacaoLedger(TRANSACAO_ID))
         jdbc.update("UPDATE pagamento_pix SET atualizado_em = atualizado_em - interval '1 hour'")
 
         assertEquals(1, reconciliacao.executar())
 
-        mvc.get("/api/v1/pagamentos/{e2e}", e2e).andExpect {
+        mvc.get("/api/v1/pagamentos/{e2e}", e2e) { header(HttpHeaders.AUTHORIZATION, CRED_CLIENTE) }.andExpect {
             jsonPath("$.estado") { value("LIQUIDADO") }
             jsonPath("$.ledgerTransacaoId") { value(TRANSACAO_ID.toString()) }
             jsonPath("$.motivo") { doesNotExist() }
@@ -236,7 +242,7 @@ class PagamentoPixApiTest : IntegrationTest() {
             jsonPath("$.estado") { value("INCERTO") }
         }
 
-        ledger.resetAll()
+        reiniciarLedger()
         ledgerResponde(201, transacaoLedger(TRANSACAO_ID))
 
         pagar(e2e, chave = CHAVE_LOJA, valor = "3.00").andExpect {
@@ -309,6 +315,89 @@ class PagamentoPixApiTest : IntegrationTest() {
         ledger.verify(exactly(0), postRequestedFor(urlEqualTo(ROTA_LEDGER)))
     }
 
+    // ===================== Autorização (anti-IDOR) =====================
+
+    @Test
+    fun `sem credencial o pagamento e recusado com 401 antes de qualquer efeito`() {
+        pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "1.00", credencial = null).andExpect {
+            status { isUnauthorized() }
+            header { string("WWW-Authenticate", "Basic realm=\"pix-simulado\"") }
+            jsonPath("$.codigo") { value("NAO_AUTENTICADO") }
+        }
+        ledger.verify(exactly(0), postRequestedFor(urlEqualTo(ROTA_LEDGER)))
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pagamento_pix", Int::class.java))
+    }
+
+    @Test
+    fun `credencial que nao e Basic gera 401 sem consultar a Ledger`() {
+        pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "1.00", credencial = "Bearer abc").andExpect {
+            status { isUnauthorized() }
+        }
+        ledger.verify(exactly(0), getRequestedFor(urlPathMatching("/api/v1/contas/.*")))
+    }
+
+    @Test
+    fun `senha recusada pela Ledger gera 401`() {
+        pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "1.00", credencial = basic(USUARIO_CLIENTE, "senha-errada"))
+            .andExpect {
+                status { isUnauthorized() }
+                jsonPath("$.codigo") { value("NAO_AUTENTICADO") }
+            }
+    }
+
+    @Test
+    fun `debitar conta de outro titular gera 403 e nao movimenta nada`() {
+        ledgerResponde(201, transacaoLedger(TRANSACAO_ID))
+
+        // O intruso informa a conta do cliente como origem: a Ledger diz que não é dele.
+        pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "500.00", credencial = CRED_INTRUSO).andExpect {
+            status { isForbidden() }
+            jsonPath("$.codigo") { value("ACESSO_NEGADO") }
+        }
+        ledger.verify(exactly(0), postRequestedFor(urlEqualTo(ROTA_LEDGER)))
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pagamento_pix", Int::class.java))
+    }
+
+    @Test
+    fun `repetir o pedido de outro titular com o mesmo E2E e corpo gera 403`() {
+        ledgerResponde(201, transacaoLedger(TRANSACAO_ID))
+        val e2e = novoEndToEndId()
+        pagar(e2e, chave = CHAVE_LOJA, valor = "10.00").andExpect { status { isCreated() } }
+
+        pagar(e2e, chave = CHAVE_LOJA, valor = "10.00", credencial = CRED_INTRUSO).andExpect {
+            status { isForbidden() }
+        }
+    }
+
+    @Test
+    fun `Ledger fora do ar na verificacao gera 503 e nada e gravado`() {
+        ledger.resetAll()
+        ledger.stubFor(get(urlPathMatching("/api/v1/contas/.*")).willReturn(aResponse().withStatus(503)))
+
+        pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "1.00").andExpect {
+            status { isServiceUnavailable() }
+            jsonPath("$.codigo") { value("LEDGER_INDISPONIVEL") }
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pagamento_pix", Int::class.java))
+    }
+
+    @Test
+    fun `pagador e recebedor consultam o pagamento, terceiros recebem 404`() {
+        ledgerResponde(201, transacaoLedger(TRANSACAO_ID))
+        val e2e = novoEndToEndId()
+        pagar(e2e, chave = CHAVE_LOJA, valor = "10.00")
+
+        listOf(CRED_CLIENTE, CRED_LOJA).forEach { credencial ->
+            mvc.get("/api/v1/pagamentos/{e2e}", e2e) { header(HttpHeaders.AUTHORIZATION, credencial) }
+                .andExpect { status { isOk() } }
+        }
+        mvc.get("/api/v1/pagamentos/{e2e}", e2e) { header(HttpHeaders.AUTHORIZATION, CRED_INTRUSO) }.andExpect {
+            status { isNotFound() }
+            jsonPath("$.codigo") { value("PAGAMENTO_NAO_ENCONTRADO") }
+        }
+        mvc.get("/api/v1/pagamentos/{e2e}", e2e).andExpect { status { isUnauthorized() } }
+    }
+
     // ===================== Validações =====================
 
     @Test
@@ -329,7 +418,7 @@ class PagamentoPixApiTest : IntegrationTest() {
 
     @Test
     fun `pagar para a propria conta gera 422`() {
-        pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "1.00", contaOrigem = CONTA_LOJA).andExpect {
+        pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "1.00", contaOrigem = CONTA_LOJA, credencial = CRED_LOJA).andExpect {
             status { isUnprocessableEntity() }
             jsonPath("$.codigo") { value("MESMA_CONTA") }
         }
@@ -404,8 +493,10 @@ class PagamentoPixApiTest : IntegrationTest() {
         valor: String? = null,
         descricao: String? = null,
         contaOrigem: UUID = CONTA_CLIENTE,
+        credencial: String? = CRED_CLIENTE,
     ): ResultActionsDsl = mvc.post("/api/v1/pagamentos") {
         contentType = MediaType.APPLICATION_JSON
+        credencial?.let { header(HttpHeaders.AUTHORIZATION, it) }
         content = json.writeValueAsString(
             buildMap {
                 put("endToEndId", e2e)
@@ -425,6 +516,28 @@ class PagamentoPixApiTest : IntegrationTest() {
             content = """{"chave": "$CHAVE_LOJA"$campoValor}"""
         }.andExpect { status { isOk() } }.andReturn().response.contentAsString
         return json.readTree(corpo)["payload"].asText()
+    }
+
+    /** Zera a Ledger simulada e recria as contas: cada titular só enxerga a própria. */
+    private fun reiniciarLedger() {
+        ledger.resetAll()
+        ledger.stubFor(
+            get(urlEqualTo("/api/v1/contas/$CONTA_CLIENTE")).atPriority(1)
+                .withBasicAuth(USUARIO_CLIENTE, SENHA_CLIENTE)
+                .willReturn(okJson("""{"id": "$CONTA_CLIENTE"}""")),
+        )
+        ledger.stubFor(
+            get(urlEqualTo("/api/v1/contas/$CONTA_LOJA")).atPriority(1)
+                .withBasicAuth(USUARIO_LOJA, SENHA_LOJA)
+                .willReturn(okJson("""{"id": "$CONTA_LOJA"}""")),
+        )
+        ledger.stubFor(
+            get(urlPathMatching("/api/v1/contas/.*")).atPriority(2)
+                .withBasicAuth(USUARIO_CLIENTE, "senha-errada")
+                .willReturn(aResponse().withStatus(401)),
+        )
+        // Qualquer outra combinação: conta alheia, e a Ledger responde 404 (anti-enumeração).
+        ledger.stubFor(get(urlPathMatching("/api/v1/contas/.*")).atPriority(10).willReturn(aResponse().withStatus(404)))
     }
 
     private fun ledgerResponde(status: Int, corpo: String, atrasoMs: Int = 0) {
@@ -450,6 +563,18 @@ class PagamentoPixApiTest : IntegrationTest() {
         val CONTA_LOJA: UUID = UUID.fromString("0b8f4c2e-1d3a-4e5f-9a7b-6c5d4e3f2a10")
         val CONTA_CLIENTE: UUID = UUID.fromString("7d1e2f3a-4b5c-4d6e-8f70-9a1b2c3d4e5f")
         val TRANSACAO_ID: UUID = UUID.fromString("c0ffee00-1111-4222-8333-444455556666")
+
+        // Titulares sintéticos na Ledger: o cliente é dono de CONTA_CLIENTE; a loja, de CONTA_LOJA.
+        const val USUARIO_CLIENTE = "cliente-sintetico"
+        const val SENHA_CLIENTE = "senha-cliente"
+        const val USUARIO_LOJA = "loja-sintetica"
+        const val SENHA_LOJA = "senha-loja"
+        val CRED_CLIENTE = basic(USUARIO_CLIENTE, SENHA_CLIENTE)
+        val CRED_LOJA = basic(USUARIO_LOJA, SENHA_LOJA)
+        val CRED_INTRUSO = basic("intruso", "qualquer")
+
+        fun basic(usuario: String, senha: String) =
+            "Basic " + Base64.getEncoder().encodeToString("$usuario:$senha".toByteArray())
 
         /** Mesma porta do application-test.yml (pix.ledger.base-url). */
         val ledger = WireMockServer(options().port(18089))

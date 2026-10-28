@@ -23,3 +23,12 @@ class ConflitoException(codigo: String, mensagem: String) : NegocioException(cod
 
 /** Entrada bem formada, mas que viola uma regra de negócio (ex.: limite de chaves). HTTP 422. */
 class RegraNegocioException(codigo: String, mensagem: String) : NegocioException(codigo, mensagem)
+
+/** Credencial ausente ou recusada. HTTP 401. */
+class NaoAutenticadoException(codigo: String, mensagem: String) : NegocioException(codigo, mensagem)
+
+/** Autenticado, mas sem direito sobre o recurso (ex.: conta de outro titular). HTTP 403. */
+class AcessoNegadoException(codigo: String, mensagem: String) : NegocioException(codigo, mensagem)
+
+/** Dependência fora do ar antes de qualquer efeito; pode tentar de novo. HTTP 503. */
+class ServicoIndisponivelException(codigo: String, mensagem: String) : NegocioException(codigo, mensagem)

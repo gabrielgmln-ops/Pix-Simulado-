@@ -2,7 +2,7 @@
 
 Serviço de pagamentos instantâneos **simulado**, inspirado no arranjo Pix, que usa a
 **Ledger API** como motor de saldo. Projeto de estudo: dados sintéticos, sem
-autenticação própria de clientes e sem integração real com o Banco Central.
+cadastro próprio de usuários (a autenticação é a da Ledger) e sem integração real com o Banco Central.
 
 ## Stack
 
@@ -112,7 +112,7 @@ O payload segue o padrão EMV (TLV) do BR Code estático. Os campos 00, 26 (GUI 
 
 ```bash
 E2E=$(curl -s -X POST localhost:8082/api/v1/pagamentos/end-to-end-id | jq -r .endToEndId)
-curl -i -X POST localhost:8082/api/v1/pagamentos -H 'Content-Type: application/json' -d "{
+curl -i -u cliente-sintetico:senha -X POST localhost:8082/api/v1/pagamentos -H 'Content-Type: application/json' -d "{
   \"endToEndId\": \"$E2E\", \"contaOrigemId\": \"7d1e2f3a-4b5c-4d6e-8f70-9a1b2c3d4e5f\",
   \"chave\": \"loja.sintetica@exemplo.com\", \"valor\": 25.90, \"descricao\": \"Pedido 123\"
 }"
@@ -138,9 +138,16 @@ curl -i -X POST localhost:8082/api/v1/pagamentos -H 'Content-Type: application/j
 
 **QR Code.** O payload é lido com a mesma rotina da Etapa 2, que confere o CRC. Se o QR traz valor, esse valor prevalece: informar outro dá `422 VALOR_QR_DIVERGENTE`. Se o QR não tem valor, o campo `valor` é obrigatório.
 
-**Ledger.** O Pix se autentica por HTTP Basic como um usuário técnico de papel OPERADOR (`LEDGER_USUARIO`, `LEDGER_SENHA`). A titularidade de quem paga é responsabilidade do Pix, como num PSP.
+**Controle de acesso (anti-IDOR).** Pagar e consultar exigem **HTTP Basic do titular**, que é o mesmo usuário dele na Ledger.
+- **Pagamento:** antes de qualquer efeito, inclusive numa repetição, o Pix pergunta à Ledger, com a credencial do cliente, se ele enxerga a conta de origem (`GET /api/v1/contas/{id}`). A Ledger só mostra a um CLIENTE as próprias contas. As respostas possíveis são:
+  - sem credencial ou credencial recusada: `401 NAO_AUTENTICADO`;
+  - conta alheia: `403 ACESSO_NEGADO`;
+  - Ledger fora do ar: `503 LEDGER_INDISPONIVEL`, sem nada gravado.
+- **Consulta:** só o pagador ou o recebedor vê o pagamento. Para terceiros, a resposta é `404`, como se ele não existisse.
+- **Débito:** a transferência em si usa o usuário técnico de papel OPERADOR do Pix (`LEDGER_USUARIO`, `LEDGER_SENHA`). É isso que permite reconciliar um INCERTO mais tarde, sem a credencial do cliente; a titularidade já foi conferida antes da reserva.
+- **Por que assim:** o Pix não guarda senhas nem um cadastro paralelo de donos, porque a regra continua em um lugar só, a Ledger.
 
-Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_INSTITUICAO`, `END_TO_END_ID_EXPIRADO`, `END_TO_END_ID_JA_UTILIZADO`, `DESTINO_INVALIDO`, `VALOR_OBRIGATORIO`, `VALOR_QR_DIVERGENTE`, `MESMA_CONTA`, `SALDO_INSUFICIENTE`, `CONTA_NAO_ENCONTRADA`, `LEDGER_RECUSOU`, `PAGAMENTO_NAO_ENCONTRADO`.
+Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_INSTITUICAO`, `END_TO_END_ID_EXPIRADO`, `END_TO_END_ID_JA_UTILIZADO`, `DESTINO_INVALIDO`, `VALOR_OBRIGATORIO`, `VALOR_QR_DIVERGENTE`, `MESMA_CONTA`, `NAO_AUTENTICADO`, `ACESSO_NEGADO`, `LEDGER_INDISPONIVEL`, `SALDO_INSUFICIENTE`, `CONTA_NAO_ENCONTRADA`, `LEDGER_RECUSOU`, `PAGAMENTO_NAO_ENCONTRADO`.
 
 ## Testes
 
@@ -151,7 +158,7 @@ Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_I
 Sem Docker disponível, os testes de integração são **ignorados** (não falham).
 Relatório de cobertura: `build/reports/jacoco/test/html/index.html`.
 
-Estado em 28/10/2026: **124 testes verdes** e **97,2% de cobertura de linhas**.
+Estado em 28/10/2026: **131 testes verdes** e **96,9% de cobertura de linhas**.
 A Ledger é simulada por um WireMock de verdade, o que permite provocar timeouts reais.
 
 ## Configuração (variáveis de ambiente)

@@ -1,10 +1,13 @@
 package br.com.pixsimulado.shared.web
 
+import br.com.pixsimulado.shared.domain.AcessoNegadoException
 import br.com.pixsimulado.shared.domain.ConflitoException
 import br.com.pixsimulado.shared.domain.EntradaInvalidaException
+import br.com.pixsimulado.shared.domain.NaoAutenticadoException
 import br.com.pixsimulado.shared.domain.NegocioException
 import br.com.pixsimulado.shared.domain.RecursoNaoEncontradoException
 import br.com.pixsimulado.shared.domain.RegraNegocioException
+import br.com.pixsimulado.shared.domain.ServicoIndisponivelException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
@@ -39,12 +42,18 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
             is RecursoNaoEncontradoException -> HttpStatus.NOT_FOUND to "Recurso não encontrado"
             is ConflitoException -> HttpStatus.CONFLICT to "Conflito"
             is RegraNegocioException -> HttpStatus.UNPROCESSABLE_ENTITY to "Regra de negócio violada"
+            is NaoAutenticadoException -> HttpStatus.UNAUTHORIZED to "Não autenticado"
+            is AcessoNegadoException -> HttpStatus.FORBIDDEN to "Acesso negado"
+            is ServicoIndisponivelException -> HttpStatus.SERVICE_UNAVAILABLE to "Serviço indisponível"
         }
         val problema = ProblemDetail.forStatusAndDetail(status, ex.message).apply {
             title = titulo
             setProperty("codigo", ex.codigo)
         }
-        return ResponseEntity.status(status).body(problema)
+        val resposta = ResponseEntity.status(status)
+        // RFC 9110: todo 401 diz ao cliente qual esquema de autenticação usar.
+        if (ex is NaoAutenticadoException) resposta.header(HttpHeaders.WWW_AUTHENTICATE, "Basic realm=\"pix-simulado\"")
+        return resposta.body(problema)
     }
 
     /** 400 com um item por campo inválido: {"campo": "titular.cpf", "mensagem": "..."} */
