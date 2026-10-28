@@ -30,7 +30,7 @@ class PixSimuladoApplicationTests : IntegrationTest() {
     @Test
     fun `flyway aplica todas as migracoes`() {
         val aplicadas = flyway.info().applied().map { it.version.version }
-        assertTrue(aplicadas.containsAll(listOf("1", "2")), "Migrações esperadas não aplicadas; aplicadas=$aplicadas")
+        assertTrue(aplicadas.containsAll(listOf("1", "2", "3", "4")), "Migrações esperadas não aplicadas; aplicadas=$aplicadas")
     }
 
     @Test

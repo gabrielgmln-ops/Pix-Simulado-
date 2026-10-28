@@ -28,7 +28,7 @@ class QrCodeApiTest : IntegrationTest() {
         mvc.post("/api/v1/chaves") {
             contentType = MediaType.APPLICATION_JSON
             content = """
-                {"tipo": "EMAIL", "valor": "loja.sintetica@exemplo.com", "contaId": "conta-loja",
+                {"tipo": "EMAIL", "valor": "loja.sintetica@exemplo.com", "contaId": "0b8f4c2e-1d3a-4e5f-9a7b-6c5d4e3f2a10",
                  "titular": {"nome": "Loja Sintética Ltda", "cpf": "12345678909"}}
             """
         }.andExpect { status { isCreated() } }

@@ -1,6 +1,11 @@
 # Perfil de testes: valores sintéticos. O datasource é injetado pelo Testcontainers
 # via @ServiceConnection, por isso não há URL/senha de banco aqui.
+# A Ledger é simulada por um WireMock numa porta fixa reservada aos testes.
 pix:
   ledger:
-    base-url: http://localhost:0   # substituído por um stub HTTP nos testes da Etapa 3
-    api-key: chave-de-teste-sintetica
+    base-url: http://localhost:18089
+    usuario: pix-operador-teste
+    senha: senha-sintetica-de-teste
+    read-timeout: 800ms
+    reconciliacao:
+      habilitada: false   # os testes disparam a reconciliação manualmente

@@ -11,7 +11,7 @@ interface ChavePixRepository : JpaRepository<ChavePix, UUID> {
 
     fun existsByValorAndStatus(valor: String, status: StatusChave): Boolean
 
-    fun findByContaIdAndStatusOrderByCriadaEmAsc(contaId: String, status: StatusChave): List<ChavePix>
+    fun findByContaIdAndStatusOrderByCriadaEmAsc(contaId: UUID, status: StatusChave): List<ChavePix>
 
     /**
      * Serializa cadastros concorrentes na MESMA conta até o fim da transação.

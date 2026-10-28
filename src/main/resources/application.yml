@@ -2,7 +2,7 @@
 # Pix Simulado - configuração base
 # Toda informação sensível ou dependente de ambiente vem de variável de ambiente.
 # Sintaxe ${VAR:padrao} -> usa o padrão apenas quando a variável não existe.
-# Segredos (senha do banco, chave da Ledger) NÃO possuem padrão: se faltarem,
+# Segredos (senha do banco, credenciais da Ledger) NÃO possuem padrão: se faltarem,
 # a aplicação falha na inicialização, o que é o comportamento desejado.
 # ============================================================================
 spring:
@@ -63,9 +63,15 @@ pix:
     limite-por-conta: ${PIX_LIMITE_CHAVES_POR_CONTA:5}
   ledger:
     base-url: ${LEDGER_BASE_URL:http://localhost:8081}
-    api-key: ${LEDGER_API_KEY}
+    # Usuário técnico (papel OPERADOR) na Ledger, via HTTP Basic. Sem padrão: obrigatório.
+    usuario: ${LEDGER_USUARIO}
+    senha: ${LEDGER_SENHA}
     connect-timeout: ${LEDGER_CONNECT_TIMEOUT:2s}
     read-timeout: ${LEDGER_READ_TIMEOUT:5s}
+    reconciliacao:
+      habilitada: ${LEDGER_RECONCILIACAO_HABILITADA:true}
+      intervalo: ${LEDGER_RECONCILIACAO_INTERVALO:30s}
+      max-tentativas: ${LEDGER_RECONCILIACAO_MAX_TENTATIVAS:10}
 
 management:
   endpoints:

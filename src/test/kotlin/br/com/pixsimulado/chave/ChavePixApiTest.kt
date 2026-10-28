@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.ResultActionsDsl
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
@@ -166,6 +167,22 @@ class ChavePixApiTest : IntegrationTest() {
     }
 
     @Test
+    fun `contaId que nao e UUID gera 400 no campo contaId`() {
+        mvc.post("/api/v1/chaves") {
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"tipo": "ALEATORIA", "contaId": "conta-0001", "titular": {"nome": "Fulano", "cpf": "$CPF_A"}}"""
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.erros[0].campo") { value("contaId") }
+        }
+    }
+
+    @Test
+    fun `listagem com contaId que nao e UUID gera 400`() {
+        mvc.get("/api/v1/chaves") { param("contaId", "conta-l") }.andExpect { status { isBadRequest() } }
+    }
+
+    @Test
     fun `tipo de chave desconhecido gera 400`() {
         cadastrar(tipo = "TELEFONE", valor = "+5511999999999")
             .andExpect { status { isBadRequest() } }
@@ -181,7 +198,7 @@ class ChavePixApiTest : IntegrationTest() {
             mvc.get("/api/v1/chaves/{chave}", formato).andExpect {
                 status { isOk() }
                 jsonPath("$.valor") { value("12345678909") }
-                jsonPath("$.contaId") { value("conta-0001") }
+                jsonPath("$.contaId") { value(conta("conta-0001").toString()) }
             }
         }
     }
@@ -219,7 +236,7 @@ class ChavePixApiTest : IntegrationTest() {
         cadastrar(tipo = "EMAIL", valor = "outra@exemplo.com", contaId = "conta-m", cpfTitular = CPF_B)
         mvc.delete("/api/v1/chaves/{chave}", "dois@exemplo.com")
 
-        mvc.get("/api/v1/chaves") { param("contaId", "conta-l") }.andExpect {
+        mvc.get("/api/v1/chaves") { param("contaId", conta("conta-l").toString()) }.andExpect {
             status { isOk() }
             jsonPath("$", hasSize<Any>(1))
             jsonPath("$[0].valor") { value("um@exemplo.com") }
@@ -263,11 +280,14 @@ class ChavePixApiTest : IntegrationTest() {
             {
               "tipo": "$tipo",
               $campoValor
-              "contaId": "$contaId",
+              "contaId": "${conta(contaId)}",
               "titular": { "nome": "Titular Sintético", "cpf": "$cpfTitular" }
             }
         """.trimIndent()
     }
+
+    /** Converte um rótulo legível ("conta-a") num UUID fixo, como os ids da Ledger. */
+    private fun conta(rotulo: String): UUID = UUID.nameUUIDFromBytes(rotulo.toByteArray())
 
     companion object {
         // CPFs sintéticos com dígitos verificadores válidos.

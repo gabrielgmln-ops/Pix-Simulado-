@@ -7,6 +7,10 @@ import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
 import java.time.Instant
+import java.util.UUID
+
+/** UUID em qualquer versão, sem chaves; comparado sem diferenciar maiúsculas. */
+const val UUID_REGEX = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 
 /*
  * DTOs da API de chaves.
@@ -28,9 +32,8 @@ data class CadastrarChaveRequest(
     val valor: String?,
 
     @field:NotBlank
-    @field:Size(max = 64)
-    @field:Pattern(regexp = "^[A-Za-z0-9_-]+$", message = "deve conter apenas letras, números, '-' ou '_'")
-    @Schema(description = "Identificador da conta na Ledger API", example = "conta-0001")
+    @field:Pattern(regexp = UUID_REGEX, message = "deve ser o UUID da conta na Ledger API")
+    @Schema(description = "UUID da conta na Ledger API", example = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b")
     val contaId: String?,
 
     @field:NotNull
@@ -40,7 +43,7 @@ data class CadastrarChaveRequest(
     fun paraComando() = NovaChave(
         tipo = tipo!!,               // !! seguro: garantido pelo @NotNull validado antes
         valor = valor,
-        contaId = contaId!!,
+        contaId = UUID.fromString(contaId!!),
         titularNome = titular!!.nome!!,
         titularCpf = titular.cpf!!,
     )
@@ -62,7 +65,7 @@ data class ChavePixResponse(
     val tipo: TipoChave,
     @Schema(description = "Valor normalizado da chave")
     val valor: String,
-    val contaId: String,
+    val contaId: UUID,
     val titular: TitularResponse,
     val criadaEm: Instant,
 ) {

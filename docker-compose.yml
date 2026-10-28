@@ -37,7 +37,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD no arquivo .env}
       # A Ledger API roda fora deste compose; por padrão, na máquina hospedeira.
       LEDGER_BASE_URL: ${LEDGER_BASE_URL:-http://host.docker.internal:8081}
-      LEDGER_API_KEY: ${LEDGER_API_KEY:?defina LEDGER_API_KEY no arquivo .env}
+      LEDGER_USUARIO: ${LEDGER_USUARIO:?defina LEDGER_USUARIO no arquivo .env}
+      LEDGER_SENHA: ${LEDGER_SENHA:?defina LEDGER_SENHA no arquivo .env}
       PIX_ISPB: ${PIX_ISPB:-99999999}
     extra_hosts:
       - "host.docker.internal:host-gateway"   # necessário no Linux

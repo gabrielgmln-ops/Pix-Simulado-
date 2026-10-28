@@ -16,7 +16,7 @@ import java.util.UUID
 data class NovaChave(
     val tipo: TipoChave,
     val valor: String?,
-    val contaId: String,
+    val contaId: UUID,
     val titularNome: String,
     val titularCpf: String,
 )
@@ -54,7 +54,7 @@ class ChavePixService(
         }
 
         // A partir daqui lemos o estado da conta para decidir: serializamos por conta.
-        repository.travarConta(comando.contaId)
+        repository.travarConta(comando.contaId.toString())
         val ativasDaConta = repository.findByContaIdAndStatusOrderByCriadaEmAsc(comando.contaId, StatusChave.ATIVA)
 
         // Regra 4
@@ -102,7 +102,7 @@ class ChavePixService(
     }
 
     @Transactional(readOnly = true)
-    fun listarPorConta(contaId: String): List<ChavePix> =
+    fun listarPorConta(contaId: UUID): List<ChavePix> =
         repository.findByContaIdAndStatusOrderByCriadaEmAsc(contaId, StatusChave.ATIVA)
 
     /** Exclusão lógica. Excluir chave inexistente ou já excluída resulta em 404. */

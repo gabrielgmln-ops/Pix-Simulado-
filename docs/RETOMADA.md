@@ -1,95 +1,67 @@
 # Pix Simulado - nota de retomada
 
-Atualizado em 28/10/2026, ao encerrar a sessão do Claude Code na nuvem.
-Próxima sessão: Claude Code no PC (Windows), vault `C:\SegundoCerebro`.
+Atualizado em 28/10/2026, ao concluir a Etapa 3 no PC (Windows), vault `C:\SegundoCerebro`.
 
 ## Estado atual
 
-**Etapas 0, 1 e 2 prontas.** 85 testes verdes (unitários + integração com
-PostgreSQL real via Testcontainers). Árvore de trabalho limpa.
+**Etapas 0 a 3 prontas.** 124 testes verdes (unitários + integração com PostgreSQL
+real via Testcontainers e a Ledger simulada por WireMock), cobertura de linhas de 97,2%.
 
 | Etapa | Escopo | Status | Commit |
 |---|---|---|---|
 | 0 | Setup: Gradle, Flyway, Docker Compose, Testcontainers | ✅ | `1365cc1` |
 | 1 | Chaves Pix (CPF, e-mail, aleatória) com validação | ✅ | `57f6e31` |
 | 2 | QR Code: BR Code EMV + imagem PNG (ZXing) | ✅ | `b80c7e3` |
-| - | Nota de retomada | ✅ | `bda4836` |
-| 3 | Transferência via Ledger, idempotência por EndToEndId | ⏳ próxima | |
-| 4 | Devolução (lançamento inverso, original preservado) | ⏳ | |
+| 3 | Transferência via Ledger, idempotência por EndToEndId | ✅ | último do `git log` |
+| 4 | Devolução (lançamento inverso, original preservado) | ⏳ próxima | |
 | 5 | Swagger completo, cobertura, CI no GitHub Actions | ⏳ | |
-
-O hash desta própria atualização é o último do `git log`.
 
 ## Restaurar o projeto
 
 ```powershell
-# Opção A - GitHub (depois que o repositório existir e receber o push)
-git clone https://github.com/gabrielgmln-ops/pix-simulado.git
-
-# Opção B - bundle baixado da conversa da nuvem
-git clone pix-simulado-backup.bundle pix-simulado
+# Atenção ao hífen no fim do nome do repositório.
+git clone https://github.com/gabrielgmln-ops/Pix-Simulado-.git pix-simulado
 cd pix-simulado
-git remote remove origin   # o bundle aparece como "origin"
-git remote add origin https://github.com/gabrielgmln-ops/pix-simulado.git
-git push -u origin main
-
+copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, SERVER_PORT=8082
 .\gradlew.bat test         # requer JDK 21 e Docker Desktop aberto
 ```
 
 ## Ambiente no PC (Windows)
 
-- A porta 8080 é do AgentService e a 8081 é da Ledger API: rodar o Pix com
-  `SERVER_PORT=8082`.
-- Se o PostgreSQL da Ledger ocupar a 5432, usar `DB_PORT=5433` no `.env` do Pix.
-- `.env` sai de `.env.example` e nunca vai para o git.
+- Portas: a 8080 é do AgentService e a 8081 é da Ledger API, então o Pix roda com `SERVER_PORT=8082`.
+- O PostgreSQL do Pix usa a 5432, que estava livre em 28/10. Se a Ledger ocupar essa porta, usar `DB_PORT=5433`.
+- O WireMock dos testes usa a porta fixa **18089**.
+- `.env` nunca vai para o git.
+- Se o Gradle disser "Unable to delete directory build\test-results", algum processo prendeu a pasta (o vault é observado pelo Obsidian): rodar `.\gradlew.bat --stop`, apagar `build\` e repetir.
 
-## Contrato da Ledger API (lido do repositório Projeto-B-A em 28/10)
+## Etapa 3 - o que foi decidido e feito
 
-- `POST /api/v1/transferencias`: cabeçalho obrigatório `Idempotency-Key`;
-  corpo `{contaOrigemId: UUID, contaDestinoId: UUID, valor: BigDecimal (até 2 casas, positivo), descricao: até 140}`.
-- `GET /api/v1/transferencias/{id}`, `POST /api/v1/depositos`,
-  `GET /api/v1/contas/{id}`, `GET /api/v1/contas/{id}/extrato`.
-- Mesma `Idempotency-Key` com corpo diferente: a Ledger responde 422.
-- A Operação Cofre (26/10) adicionou HTTP Basic e dono por conta na Ledger, mas
-  **não foi commitada**. Conferir o estado real em `C:\SegundoCerebro\ledger-api`.
+- **V3:** `chave_pix.conta_id` passa a ser UUID, com cast estrito. Se houver dado fora do formato, a migração falha em vez de adulterá-lo.
+- **V4:** tabela `pagamento_pix`, com PK `end_to_end_id` e CHECKs de formato, estado, valor positivo, contas distintas e "LIQUIDADO tem id da Ledger".
+- **EndToEndId** gerado pelo Pix em `POST /api/v1/pagamentos/end-to-end-id`. Não é preciso reservá-lo no banco: o sufixo aleatório de 62^11 combinações vem de um `SecureRandom`. Vale 24 h e precisa trazer o ISPB da casa.
+- **Idempotência:**
+  - o hash SHA-256 é calculado sobre o pedido normalizado, sem consultar o banco, então a repetição é reconhecida mesmo que a chave tenha sido excluída depois;
+  - a concorrência é resolvida com `INSERT ... ON CONFLICT DO NOTHING` mais `SELECT ... FOR UPDATE`.
+- **Decisão consciente:** a chamada HTTP à Ledger acontece dentro da transação que segura o lock do pagamento. Isso serializa as repetições do mesmo E2E, ao custo de prender uma conexão do pool por até o read-timeout.
+- **Estados:** `PENDENTE`, `LIQUIDADO`, `REJEITADO` e `INCERTO`.
+  - Timeout, 5xx, 401 e o "Conflito de idempotencia" da Ledger viram INCERTO.
+  - Os 4xx de negócio viram REJEITADO, gravado; a repetição devolve a mesma recusa (422).
+- **Reconciliação:** a classe `ReconciliacaoPagamentos` reenvia os INCERTOS com a mesma `Idempotency-Key`, com intervalo e limite de tentativas. A repetição do cliente também reenvia.
+- **Ledger:** HTTP Basic com usuário técnico OPERADOR (`LEDGER_USUARIO`, `LEDGER_SENHA`), substituindo a antiga `LEDGER_API_KEY`. A Ledger não expõe `codigo` nos erros, então o cliente distingue os 422 pelo `title` e pelo `detail`.
+- **Cliente HTTP** em HTTP/1.1 explícito: o padrão do JDK tenta h2c, que o Jetty do WireMock cancela.
+- **Testes:** 24 de API, entre eles timeout real, reconciliação, 5xx, 401, saldo insuficiente, QR com e sem valor e QR adulterado, além de 20 threads com o mesmo E2E resultando em uma única chamada à Ledger. Mais 13 unitários do EndToEndId.
 
-## Decisões tomadas
+## Pendências
 
-- Kotlin 2.1 + Spring Boot 3.5.6 + Java 21; Testcontainers fixado em 1.21.4
-  (a 1.21.3 não conecta no Docker Engine 29).
-- Dinheiro: BigDecimal / NUMERIC(19,2); mais de 2 casas é recusado, nunca arredondado.
-- Erros RFC 9457 com `codigo` estável; exceções de negócio em hierarquia sealed
-  (`EntradaInvalida` 400, `RecursoNaoEncontrado` 404, `Conflito` 409, `RegraNegocio` 422).
-- Chaves: exclusão lógica; índice único parcial só entre ATIVAS; limite de 5 por
-  conta protegido por advisory lock do PostgreSQL; CPF do titular mascarado.
-- QR Code estático não é persistido; leitura confere o CRC16 e não restringe o
-  tipo da chave (QRs de outros bancos podem ter telefone/CNPJ).
-- A cidade no QR é a da instituição (`PIX_CIDADE`).
-
-## Pendências e decisões para a Etapa 3
-
-1. `contaId` das chaves passa a exigir UUID (id da conta na Ledger), via nova
-   migração Flyway. Nunca alterar migração já aplicada.
-2. EndToEndId no formato do Bacen: `E` + ISPB (8) + `yyyyMMddHHmm` UTC + 11
-   alfanuméricos = 32 caracteres. É o `Idempotency-Key` enviado à Ledger.
-3. Idempotência no Pix: repetição devolve o mesmo resultado; mesmo EndToEndId
-   com corpo diferente = 422.
-4. Pagar por chave ou por payload de QR (`BrCode.ler`); o valor do QR, se houver,
-   prevalece.
-5. Timeout da Ledger (resultado incerto): consultar antes de repetir; nunca
-   debitar duas vezes.
-6. Credenciais da Ledger por variável de ambiente (`LEDGER_USUARIO`,
-   `LEDGER_SENHA`) se o HTTP Basic estiver ativo; a `LEDGER_API_KEY` atual pode
-   ser substituída.
-7. Testes com a Ledger simulada (WireMock ou MockRestServiceServer) e teste de
-   concorrência com o mesmo EndToEndId.
-
-## O que o senhor precisa fornecer
-
-- Criar o repositório vazio `gabrielgmln-ops/pix-simulado` no GitHub.
-- Confirmar se a Operação Cofre da Ledger será commitada antes da Etapa 3.
-
-## Pendência no vault
-
-- Acrescentar o Pix Simulado ao `MOC Projetos.md` (seção Estado e link
-  `[[Pix Simulado]]` em Notas da área). Não foi possível pela nuvem.
+1. A Operação Cofre da Ledger (HTTP Basic, dono por conta) **continua sem commit** no
+   `ledger-api`. Para testar de ponta a ponta contra a Ledger real, é preciso:
+   - commitar e subir a Ledger;
+   - criar na Ledger um usuário OPERADOR para o Pix;
+   - criar contas e depositar saldo.
+2. **Etapa 4 - devolução:**
+   - lançamento inverso, que é uma transferência destino→origem com novo E2E/Idempotency-Key, sempre ligada ao pagamento original;
+   - o original nunca é apagado;
+   - a soma das devoluções não pode passar do valor pago;
+   - prazo (no Pix real, 90 dias).
+3. **Etapa 5:** Swagger completo, meta de cobertura no Jacoco, CI no GitHub Actions
+   (o Testcontainers funciona no runner `ubuntu-latest`).

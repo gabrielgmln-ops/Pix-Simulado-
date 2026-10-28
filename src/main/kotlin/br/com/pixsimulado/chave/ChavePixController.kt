@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder
+import java.util.UUID
 
 /**
  * API REST de chaves Pix. Camada fina: converte HTTP <-> domínio e delega ao serviço.
@@ -53,7 +54,7 @@ class ChavePixController(private val service: ChavePixService) {
 
     @GetMapping
     @Operation(summary = "Lista as chaves ativas de uma conta")
-    fun listarPorConta(@RequestParam contaId: String): List<ChavePixResponse> =
+    fun listarPorConta(@RequestParam contaId: UUID): List<ChavePixResponse> =
         service.listarPorConta(contaId).map(ChavePixResponse::de)
 
     @DeleteMapping("/{chave}")

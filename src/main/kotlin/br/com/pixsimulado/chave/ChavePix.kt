@@ -41,7 +41,7 @@ class ChavePix(
 
     /** Identificador da conta na Ledger API que recebe os créditos desta chave. */
     @Column(name = "conta_id", nullable = false, updatable = false)
-    val contaId: String,
+    val contaId: UUID,
 
     @Column(name = "titular_nome", nullable = false, updatable = false)
     val titularNome: String,

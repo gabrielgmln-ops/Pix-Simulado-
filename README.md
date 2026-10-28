@@ -2,7 +2,7 @@
 
 Serviço de pagamentos instantâneos **simulado**, inspirado no arranjo Pix, que usa a
 **Ledger API** como motor de saldo. Projeto de estudo: dados sintéticos, sem
-autenticação e sem integração real com o Banco Central.
+autenticação própria de clientes e sem integração real com o Banco Central.
 
 ## Stack
 
@@ -16,7 +16,7 @@ JUnit 5 · Testcontainers · Docker Compose · GitHub Actions
 | 0 | Setup do projeto, infraestrutura e convenções | ✅ |
 | 1 | Cadastro e validação de chaves Pix (CPF, e-mail, aleatória) | ✅ |
 | 2 | Geração e leitura de QR Code (payload EMV simplificado) | ✅ |
-| 3 | Transferência instantânea via Ledger com idempotência por EndToEndId | ⏳ |
+| 3 | Transferência instantânea via Ledger com idempotência por EndToEndId | ✅ |
 | 4 | Devolução (lançamento inverso, original preservado) | ⏳ |
 | 5 | Swagger completo, testes, cobertura e CI | ⏳ |
 
@@ -25,7 +25,7 @@ JUnit 5 · Testcontainers · Docker Compose · GitHub Actions
 Pré-requisitos: JDK 21 e Docker.
 
 ```bash
-cp .env.example .env            # ajuste senha do banco e chave da Ledger
+cp .env.example .env            # ajuste a senha do banco e o usuário/senha da Ledger
 
 # Opção A - tudo em contêiner
 docker compose up -d --build
@@ -57,13 +57,14 @@ altere com `LEDGER_BASE_URL`.
 
 ```bash
 curl -X POST localhost:8080/api/v1/chaves -H 'Content-Type: application/json' -d '{
-  "tipo": "EMAIL", "valor": "fulano.sintetico@exemplo.com", "contaId": "conta-0001",
+  "tipo": "EMAIL", "valor": "fulano.sintetico@exemplo.com", "contaId": "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b",
   "titular": { "nome": "Fulano Sintético", "cpf": "123.456.789-09" }
 }'
 ```
 
 Regras aplicadas:
 
+0. `contaId` é o **UUID da conta na Ledger API** (migração V3).
 1. Valor validado e **normalizado** por tipo: CPF com 11 dígitos (módulo 11, sequências repetidas rejeitadas), e-mail em minúsculas com até 77 caracteres, chave aleatória em UUID v4.
 2. A chave aleatória é **gerada pelo servidor**; enviar `valor` resulta em 422.
 3. Uma chave CPF precisa ser o CPF do próprio titular.
@@ -101,28 +102,72 @@ O payload segue o padrão EMV (TLV) do BR Code estático. Os campos 00, 26 (GUI 
 - **Leitura**: a leitura confere o CRC, então um QR adulterado é rejeitado com `QRCODE_CRC_INVALIDO`. Ela não restringe o tipo da chave, porque QRs de outras instituições podem trazer telefone ou CNPJ.
 - **Fora do escopo**: QR dinâmico (campo 25, cobrança por URL).
 
+## API - Pagamentos (Etapa 3)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `POST` | `/api/v1/pagamentos/end-to-end-id` | Gera o EndToEndId de um novo pagamento |
+| `POST` | `/api/v1/pagamentos` | Paga por `chave` **ou** `qrPayload` (idempotente pelo EndToEndId) |
+| `GET` | `/api/v1/pagamentos/{endToEndId}` | Consulta o pagamento em qualquer estado |
+
+```bash
+E2E=$(curl -s -X POST localhost:8082/api/v1/pagamentos/end-to-end-id | jq -r .endToEndId)
+curl -i -X POST localhost:8082/api/v1/pagamentos -H 'Content-Type: application/json' -d "{
+  \"endToEndId\": \"$E2E\", \"contaOrigemId\": \"7d1e2f3a-4b5c-4d6e-8f70-9a1b2c3d4e5f\",
+  \"chave\": \"loja.sintetica@exemplo.com\", \"valor\": 25.90, \"descricao\": \"Pedido 123\"
+}"
+```
+
+**EndToEndId** no formato do Bacen, com 32 caracteres: `E` + ISPB (8) + `yyyyMMddHHmm` UTC + 11 alfanuméricos de um `SecureRandom`. O Pix gera o identificador, que vale por 24 h (a mesma janela de idempotência da Ledger), e o envia à Ledger como `Idempotency-Key`.
+
+**Estados**
+
+| Estado | Significado | HTTP |
+|--------|-------------|------|
+| `LIQUIDADO` | A Ledger gravou a transferência; a resposta traz o `ledgerTransacaoId` | `201` |
+| `REJEITADO` | A Ledger recusou com certeza (saldo, conta inexistente); nada foi debitado | `422` com `codigo` |
+| `INCERTO` | Houve timeout, 5xx ou 401 da Ledger: não se sabe se debitou | `202` |
+
+**Idempotência**
+
+- **Mesmo pedido repetido:** devolve o mesmo resultado, com o cabeçalho `Idempotent-Replayed: true` e sem nova movimentação.
+- **Mesmo EndToEndId com dados diferentes:** `422 END_TO_END_ID_JA_UTILIZADO`.
+- **Concorrência:** a garantia é `INSERT ... ON CONFLICT DO NOTHING` na chave primária mais `SELECT ... FOR UPDATE`. Com 20 requisições simultâneas, a Ledger recebe exatamente uma chamada.
+
+**Resultado incerto.** Um pagamento INCERTO nunca é tratado como falha. A reconciliação (`@Scheduled`, a cada `LEDGER_RECONCILIACAO_INTERVALO`) e a repetição do próprio cliente reenviam o pedido com a **mesma** `Idempotency-Key`. A Ledger então devolve a transação já gravada ou executa pela primeira vez, mas nunca debita duas vezes. Depois de `LEDGER_RECONCILIACAO_MAX_TENTATIVAS`, o pagamento fica INCERTO à espera de análise manual.
+
+**QR Code.** O payload é lido com a mesma rotina da Etapa 2, que confere o CRC. Se o QR traz valor, esse valor prevalece: informar outro dá `422 VALOR_QR_DIVERGENTE`. Se o QR não tem valor, o campo `valor` é obrigatório.
+
+**Ledger.** O Pix se autentica por HTTP Basic como um usuário técnico de papel OPERADOR (`LEDGER_USUARIO`, `LEDGER_SENHA`). A titularidade de quem paga é responsabilidade do Pix, como num PSP.
+
+Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_INSTITUICAO`, `END_TO_END_ID_EXPIRADO`, `END_TO_END_ID_JA_UTILIZADO`, `DESTINO_INVALIDO`, `VALOR_OBRIGATORIO`, `VALOR_QR_DIVERGENTE`, `MESMA_CONTA`, `SALDO_INSUFICIENTE`, `CONTA_NAO_ENCONTRADA`, `LEDGER_RECUSOU`, `PAGAMENTO_NAO_ENCONTRADO`.
+
 ## Testes
 
 ```bash
-./gradlew test    # unitários + integração (PostgreSQL real via Testcontainers)
+./gradlew test    # unitários + integração (PostgreSQL real via Testcontainers, Ledger via WireMock)
 ```
 
 Sem Docker disponível, os testes de integração são **ignorados** (não falham).
 Relatório de cobertura: `build/reports/jacoco/test/html/index.html`.
+
+Estado em 28/10/2026: **124 testes verdes** e **97,2% de cobertura de linhas**.
+A Ledger é simulada por um WireMock de verdade, o que permite provocar timeouts reais.
 
 ## Configuração (variáveis de ambiente)
 
 | Variável | Obrigatória | Padrão | Descrição |
 |----------|:-----------:|--------|-----------|
 | `DB_PASSWORD` | sim | — | Senha do PostgreSQL |
-| `LEDGER_API_KEY` | sim | — | Credencial da Ledger API |
+| `LEDGER_USUARIO` / `LEDGER_SENHA` | sim | — | Usuário técnico (OPERADOR) da Ledger, por HTTP Basic |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` | não | `localhost` / `5432` / `pix` / `pix` | Conexão com o banco |
 | `LEDGER_BASE_URL` | não | `http://localhost:8081` | URL da Ledger |
-| `LEDGER_CONNECT_TIMEOUT` / `LEDGER_READ_TIMEOUT` | não | `2s` / `5s` | Timeouts da Ledger |
+| `LEDGER_CONNECT_TIMEOUT` / `LEDGER_READ_TIMEOUT` | não | `2s` / `5s` | Timeouts da Ledger (estourou = `INCERTO`) |
+| `LEDGER_RECONCILIACAO_HABILITADA` / `_INTERVALO` / `_MAX_TENTATIVAS` | não | `true` / `30s` / `10` | Reenvio dos pagamentos incertos |
 | `PIX_ISPB` | não | `99999999` | ISPB sintético da instituição (8 dígitos) |
 | `PIX_NOME_INSTITUICAO` / `PIX_CIDADE` | não | `PIX SIMULADO SA` / `SAO PAULO` | Dados do recebedor no QR Code |
 | `PIX_LIMITE_CHAVES_POR_CONTA` | não | `5` | Máximo de chaves ativas por conta |
-| `SERVER_PORT` | não | `8080` | Porta HTTP |
+| `SERVER_PORT` | não | `8080` | Porta HTTP (no PC do autor: `8082`) |
 
 Segredos não têm valor padrão: se faltarem, a aplicação falha na inicialização.
 
@@ -142,6 +187,8 @@ src/main/kotlin/br/com/pixsimulado/
 ├── config/          # propriedades, OpenAPI, Clock
 ├── chave/           # Etapa 1: domínio, serviço e API de chaves Pix
 ├── qrcode/          # Etapa 2: BR Code (EMV/TLV, CRC16) e imagem PNG (ZXing)
+├── pagamento/       # Etapa 3: EndToEndId, pagamento idempotente, reconciliação
+├── ledger/          # Etapa 3: cliente HTTP da Ledger API
 └── shared/
     ├── domain/      # exceções de negócio (sealed)
     └── web/         # tratamento global de erros
