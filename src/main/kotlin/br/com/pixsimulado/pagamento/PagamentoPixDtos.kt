@@ -67,6 +67,8 @@ data class PagamentoResponse(
     val contaDestinoId: UUID,
     val chaveDestino: String,
     val valor: BigDecimal,
+    @Schema(description = "Soma das devoluções já liquidadas (o pagamento em si nunca muda)")
+    val valorDevolvido: BigDecimal,
     val descricao: String?,
     @Schema(description = "Id da transação na Ledger (somente LIQUIDADO)")
     val ledgerTransacaoId: UUID?,
@@ -75,13 +77,14 @@ data class PagamentoResponse(
     val atualizadoEm: Instant,
 ) {
     companion object {
-        fun de(p: PagamentoPix) = PagamentoResponse(
+        fun de(p: PagamentoPix, valorDevolvido: BigDecimal) = PagamentoResponse(
             endToEndId = p.endToEndId,
             estado = p.estado,
             contaOrigemId = p.contaOrigemId,
             contaDestinoId = p.contaDestinoId,
             chaveDestino = p.chaveDestino,
             valor = p.valor,
+            valorDevolvido = valorDevolvido.setScale(2),
             descricao = p.descricao,
             ledgerTransacaoId = p.ledgerTransacaoId,
             motivo = p.motivoCodigo?.let { MotivoResponse(it, p.motivoMensagem.orEmpty()) },

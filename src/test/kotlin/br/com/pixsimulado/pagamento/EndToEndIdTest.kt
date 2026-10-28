@@ -44,6 +44,23 @@ class EndToEndIdTest {
         assertEquals("E12345678202610281530aBcDeFgHiJk", EndToEndId.de("  E12345678202610281530aBcDeFgHiJk ").valor)
     }
 
+    @Test
+    fun `gera e aceita identificador de devolucao com prefixo D`() {
+        val id = EndToEndId.gerar("12345678", relogio, EndToEndId.DEVOLUCAO)
+
+        assertTrue(id.valor.startsWith("D12345678202610281530"), id.valor)
+        assertEquals(EndToEndId.DEVOLUCAO, EndToEndId.de(id.valor, EndToEndId.DEVOLUCAO).prefixo)
+    }
+
+    @Test
+    fun `prefixo trocado e recusado com o codigo do tipo esperado`() {
+        val pagamento = "E12345678202610281530aBcDeFgHiJk"
+        val devolucao = "D12345678202610281530aBcDeFgHiJk"
+
+        assertEquals("ID_DEVOLUCAO_INVALIDO", assertFailsWith<EntradaInvalidaException> { EndToEndId.de(pagamento, EndToEndId.DEVOLUCAO) }.codigo)
+        assertEquals("END_TO_END_ID_INVALIDO", assertFailsWith<EntradaInvalidaException> { EndToEndId.de(devolucao) }.codigo)
+    }
+
     @ParameterizedTest
     @ValueSource(
         strings = [

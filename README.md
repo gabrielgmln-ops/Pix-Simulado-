@@ -17,7 +17,7 @@ JUnit 5 · Testcontainers · Docker Compose · GitHub Actions
 | 1 | Cadastro e validação de chaves Pix (CPF, e-mail, aleatória) | ✅ |
 | 2 | Geração e leitura de QR Code (payload EMV simplificado) | ✅ |
 | 3 | Transferência instantânea via Ledger com idempotência por EndToEndId | ✅ |
-| 4 | Devolução (lançamento inverso, original preservado) | ⏳ |
+| 4 | Devolução (lançamento inverso, original preservado) | ✅ |
 | 5 | Swagger completo, testes, cobertura e CI | ⏳ |
 
 ## Como executar
@@ -147,7 +147,34 @@ curl -i -u cliente-sintetico:senha -X POST localhost:8082/api/v1/pagamentos -H '
 - **Débito:** a transferência em si usa o usuário técnico de papel OPERADOR do Pix (`LEDGER_USUARIO`, `LEDGER_SENHA`). É isso que permite reconciliar um INCERTO mais tarde, sem a credencial do cliente; a titularidade já foi conferida antes da reserva.
 - **Por que assim:** o Pix não guarda senhas nem um cadastro paralelo de donos, porque a regra continua em um lugar só, a Ledger.
 
-Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_INSTITUICAO`, `END_TO_END_ID_EXPIRADO`, `END_TO_END_ID_JA_UTILIZADO`, `DESTINO_INVALIDO`, `VALOR_OBRIGATORIO`, `VALOR_QR_DIVERGENTE`, `MESMA_CONTA`, `NAO_AUTENTICADO`, `ACESSO_NEGADO`, `LEDGER_INDISPONIVEL`, `SALDO_INSUFICIENTE`, `CONTA_NAO_ENCONTRADA`, `LEDGER_RECUSOU`, `PAGAMENTO_NAO_ENCONTRADO`.
+Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_INSTITUICAO`, `END_TO_END_ID_EXPIRADO`, `END_TO_END_ID_JA_UTILIZADO`, `DESTINO_INVALIDO`, `VALOR_OBRIGATORIO`, `VALOR_QR_DIVERGENTE`, `MESMA_CONTA`, `NAO_AUTENTICADO`, `ACESSO_NEGADO`, `LEDGER_INDISPONIVEL`, `SALDO_INSUFICIENTE`, `CONTA_NAO_ENCONTRADA`, `LEDGER_RECUSOU`, `PAGAMENTO_NAO_ENCONTRADO`. Devolução: `ID_DEVOLUCAO_INVALIDO`, `ID_DEVOLUCAO_JA_UTILIZADO`, `ID_DEVOLUCAO_EXPIRADO`, `PAGAMENTO_NAO_LIQUIDADO`, `PRAZO_DEVOLUCAO_EXPIRADO`, `VALOR_DEVOLUCAO_EXCEDIDO`.
+
+## API - Devoluções (Etapa 4)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `POST` | `/api/v1/pagamentos/{e2e}/devolucoes/id` | Gera o identificador da devolução (prefixo `D`) |
+| `POST` | `/api/v1/pagamentos/{e2e}/devolucoes` | Devolve, total ou parcialmente (idempotente pelo id) |
+| `GET` | `/api/v1/pagamentos/{e2e}/devolucoes` | Lista as devoluções do pagamento |
+
+```bash
+ID=$(curl -s -X POST localhost:8082/api/v1/pagamentos/$E2E/devolucoes/id | jq -r .idDevolucao)
+curl -i -u loja-sintetica:senha -X POST localhost:8082/api/v1/pagamentos/$E2E/devolucoes \
+  -H 'Content-Type: application/json' -d "{\"idDevolucao\": \"$ID\", \"valor\": 10.00, \"motivo\": \"MD06\"}"
+```
+
+- **Lançamento inverso:** a devolução é uma **nova transferência na Ledger**, do recebedor para o pagador.
+  - O pagamento original nunca é alterado nem apagado.
+  - O `valorDevolvido` do pagamento é sempre a soma das devoluções liquidadas, como o saldo da Ledger é a soma dos lançamentos.
+- **Identificador:** mesmo formato do E2E, mas com prefixo `D` (`D` + ISPB + `yyyyMMddHHmm` + 11 alfanuméricos). Ele é o `Idempotency-Key` na Ledger, então nunca colide com o pagamento.
+- **Limite:** pode haver várias devoluções parciais, mas a soma **comprometida** nunca passa do valor pago (`422 VALOR_DEVOLUCAO_EXCEDIDO`).
+  - "Comprometida" inclui as devoluções INCERTAS: se não se sabe se devolveu, conta-se que devolveu.
+  - O pagamento é travado (`SELECT ... FOR UPDATE`) antes da soma. Com 20 devoluções simultâneas de R$ 10 num Pix de R$ 100, liquidam exatamente 10.
+- **Prazo:** 90 dias contados da liquidação (`PIX_DEVOLUCAO_PRAZO`). Depois disso, `422 PRAZO_DEVOLUCAO_EXPIRADO`.
+- **Só pagamento LIQUIDADO:** qualquer outro estado dá `422 PAGAMENTO_NAO_LIQUIDADO`.
+- **Quem pode:** só o **recebedor** devolve. O pagador recebe `403`, e terceiros recebem `404`. Pagador e recebedor podem listar.
+- **Motivos:** `MD06` (pedido do cliente), `BE08` (erro operacional) e `FR01` (fraude), inspirados no ISO 20022.
+- **Recusa e incerteza:** recebedor sem saldo dá `422 SALDO_INSUFICIENTE`; a devolução fica REJEITADA e não conta no limite. Um timeout deixa a devolução INCERTA, e a mesma reconciliação dos pagamentos resolve.
 
 ## Testes
 
@@ -158,7 +185,7 @@ Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_I
 Sem Docker disponível, os testes de integração são **ignorados** (não falham).
 Relatório de cobertura: `build/reports/jacoco/test/html/index.html`.
 
-Estado em 28/10/2026: **131 testes verdes** e **96,9% de cobertura de linhas**.
+Estado em 28/10/2026: **151 testes verdes** e **96,3% de cobertura de linhas**.
 A Ledger é simulada por um WireMock de verdade, o que permite provocar timeouts reais.
 
 ## Configuração (variáveis de ambiente)
@@ -174,6 +201,7 @@ A Ledger é simulada por um WireMock de verdade, o que permite provocar timeouts
 | `PIX_ISPB` | não | `99999999` | ISPB sintético da instituição (8 dígitos) |
 | `PIX_NOME_INSTITUICAO` / `PIX_CIDADE` | não | `PIX SIMULADO SA` / `SAO PAULO` | Dados do recebedor no QR Code |
 | `PIX_LIMITE_CHAVES_POR_CONTA` | não | `5` | Máximo de chaves ativas por conta |
+| `PIX_DEVOLUCAO_PRAZO` | não | `90d` | Prazo para devolver, contado da liquidação |
 | `SERVER_PORT` | não | `8080` | Porta HTTP (no PC do autor: `8082`) |
 
 Segredos não têm valor padrão: se faltarem, a aplicação falha na inicialização.
@@ -194,7 +222,7 @@ src/main/kotlin/br/com/pixsimulado/
 ├── config/          # propriedades, OpenAPI, Clock
 ├── chave/           # Etapa 1: domínio, serviço e API de chaves Pix
 ├── qrcode/          # Etapa 2: BR Code (EMV/TLV, CRC16) e imagem PNG (ZXing)
-├── pagamento/       # Etapa 3: EndToEndId, pagamento idempotente, reconciliação
+├── pagamento/       # Etapas 3 e 4: EndToEndId, pagamento e devolução idempotentes, reconciliação
 ├── ledger/          # Etapa 3: cliente HTTP da Ledger API
 └── shared/
     ├── domain/      # exceções de negócio (sealed)

@@ -35,6 +35,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder
 class PagamentoPixController(
     private val service: PagamentoPixService,
     private val autorizacao: AutorizacaoConta,
+    private val devolucoes: DevolucaoPixService,
 ) {
 
     @PostMapping("/end-to-end-id")
@@ -79,7 +80,7 @@ class PagamentoPixController(
         return ResponseEntity.status(status)
             .location(location)
             .header(CABECALHO_REPETIDO, repetido.toString())
-            .body(PagamentoResponse.de(pagamento))
+            .body(PagamentoResponse.de(pagamento, devolucoes.valorDevolvido(pagamento.endToEndId)))
     }
 
     @GetMapping("/{endToEndId}")
@@ -97,7 +98,7 @@ class PagamentoPixController(
         if (!autorizacao.eDonoDeAlguma(credencial, pagamento.contaOrigemId, pagamento.contaDestinoId)) {
             throw RecursoNaoEncontradoException("PAGAMENTO_NAO_ENCONTRADO", "Pagamento não encontrado")
         }
-        return PagamentoResponse.de(pagamento)
+        return PagamentoResponse.de(pagamento, devolucoes.valorDevolvido(pagamento.endToEndId))
     }
 
     companion object {

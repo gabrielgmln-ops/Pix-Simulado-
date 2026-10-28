@@ -4,9 +4,6 @@ import br.com.pixsimulado.chave.ChavePixService
 import br.com.pixsimulado.chave.TipoChave
 import br.com.pixsimulado.config.LedgerProperties
 import br.com.pixsimulado.config.PixProperties
-import br.com.pixsimulado.ledger.LedgerClient
-import br.com.pixsimulado.ledger.ResultadoLedger
-import br.com.pixsimulado.ledger.TransferenciaLedger
 import br.com.pixsimulado.qrcode.BrCode
 import br.com.pixsimulado.shared.domain.EntradaInvalidaException
 import br.com.pixsimulado.shared.domain.RecursoNaoEncontradoException
@@ -55,7 +52,7 @@ data class ResultadoPagamento(val pagamento: PagamentoPix, val repetido: Boolean
 class PagamentoPixService(
     private val repository: PagamentoPixRepository,
     private val chaveService: ChavePixService,
-    private val ledger: LedgerClient,
+    private val executor: ExecutorLedger,
     private val pixProperties: PixProperties,
     private val ledgerProperties: LedgerProperties,
     private val clock: Clock,
@@ -142,18 +139,7 @@ class PagamentoPixService(
     }
 
     private fun enviarParaLedger(pagamento: PagamentoPix) {
-        pagamento.registrarTentativa(clock.instant())
-        val pedido = TransferenciaLedger(
-            contaOrigemId = pagamento.contaOrigemId,
-            contaDestinoId = pagamento.contaDestinoId,
-            valor = pagamento.valor,
-            descricao = pagamento.descricao,
-        )
-        when (val resultado = ledger.transferir(pagamento.endToEndId, pedido)) {
-            is ResultadoLedger.Efetivada -> pagamento.liquidar(resultado.transacaoId, clock.instant())
-            is ResultadoLedger.Recusada -> pagamento.rejeitar(resultado.codigo, resultado.mensagem, clock.instant())
-            is ResultadoLedger.Indeterminada -> pagamento.marcarIncerto(resultado.motivo, clock.instant())
-        }
+        executor.enviar(pagamento)
         log.info(
             "Pagamento Pix e2e={} estado={} tentativa={} valor={}",
             pagamento.endToEndId, pagamento.estado, pagamento.tentativas, pagamento.valor,

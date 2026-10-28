@@ -1,11 +1,11 @@
 # Pix Simulado - nota de retomada
 
-Atualizado em 28/10/2026, ao concluir a Etapa 3 no PC (Windows), vault `C:\SegundoCerebro`.
+Atualizado em 28/10/2026, ao concluir a Etapa 4 no PC (Windows), vault `C:\SegundoCerebro`.
 
 ## Estado atual
 
-**Etapas 0 a 3 prontas.** 131 testes verdes (unitários + integração com PostgreSQL
-real via Testcontainers e a Ledger simulada por WireMock), cobertura de linhas de 96,9%.
+**Etapas 0 a 4 prontas.** 151 testes verdes (unitários + integração com PostgreSQL
+real via Testcontainers e a Ledger simulada por WireMock), cobertura de linhas de 96,3%.
 
 | Etapa | Escopo | Status | Commit |
 |---|---|---|---|
@@ -13,9 +13,9 @@ real via Testcontainers e a Ledger simulada por WireMock), cobertura de linhas d
 | 1 | Chaves Pix (CPF, e-mail, aleatória) com validação | ✅ | `57f6e31` |
 | 2 | QR Code: BR Code EMV + imagem PNG (ZXing) | ✅ | `b80c7e3` |
 | 3 | Transferência via Ledger, idempotência por EndToEndId | ✅ | `96c9aa2` |
-| 3+ | Correção anti-IDOR (dono da conta conferido na Ledger) | ✅ | último do `git log` |
-| 4 | Devolução (lançamento inverso, original preservado) | ⏳ próxima | |
-| 5 | Swagger completo, cobertura, CI no GitHub Actions | ⏳ | |
+| 3+ | Correção anti-IDOR (dono da conta conferido na Ledger) | ✅ | `29cef4c` |
+| 4 | Devolução (lançamento inverso, original preservado) | ✅ | último do `git log` |
+| 5 | Swagger completo, cobertura, CI no GitHub Actions | ⏳ próxima | |
 
 ## Restaurar o projeto
 
@@ -65,6 +65,24 @@ copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, 
 - **Testes:** 7 novos, de 401, credencial não-Basic, senha errada, conta alheia, repetição
   por terceiro, Ledger fora e consulta por pagador, recebedor e terceiro.
 
+## Etapa 4 - devolução
+
+- **V5:** tabela `devolucao_pix`, com FK para o pagamento original e os mesmos CHECKs da V4,
+  mais o motivo (MD06, BE08 ou FR01). O original nunca muda, e `valorDevolvido` é a soma das
+  devoluções LIQUIDADAS.
+- **Identificador:** o `EndToEndId` ganhou o prefixo `D` para as devoluções, e o código de erro varia com o prefixo.
+- **Base comum:** a nova `OperacaoLedger` (`@MappedSuperclass`) reúne estados e transições, e o
+  `ExecutorLedger` envia e classifica a chamada. Pagamento e devolução usam os dois, então a regra
+  "timeout é INCERTO" está escrita em um só lugar.
+- **Limite:** a soma comprometida (tudo menos REJEITADO, incluindo INCERTO) não passa do valor pago.
+  - A ordem dos locks é sempre pagamento → devolução, para não haver deadlock.
+  - O id da devolução é conferido de novo depois do lock do pagamento, para tratar a corrida do mesmo id.
+- **Prazo:** 90 dias desde a liquidação (`atualizado_em`, que não muda mais depois de LIQUIDADO).
+- **Acesso:** só o recebedor devolve. O pagador recebe 403, e quem não é parte do pagamento recebe 404 (anti-enumeração).
+- **Testes:** 18 de API em `DevolucaoPixApiTest`, entre eles 20 devoluções simultâneas de R$ 10 num
+  Pix de R$ 100 (liquidam exatamente 10). Mais 2 unitários do prefixo D. A Ledger simulada e os
+  helpers foram para a base `LedgerSimuladaTest`.
+
 ## Pendências
 
 1. A Operação Cofre da Ledger (HTTP Basic, dono por conta) **continua sem commit** no
@@ -72,10 +90,5 @@ copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, 
    - commitar e subir a Ledger;
    - criar na Ledger um usuário OPERADOR para o Pix e usuários CLIENTE donos das contas;
    - criar contas e depositar saldo.
-2. **Etapa 4 - devolução:**
-   - lançamento inverso, que é uma transferência destino→origem com novo E2E/Idempotency-Key, sempre ligada ao pagamento original;
-   - o original nunca é apagado;
-   - a soma das devoluções não pode passar do valor pago;
-   - prazo (no Pix real, 90 dias).
-3. **Etapa 5:** Swagger completo, meta de cobertura no Jacoco, CI no GitHub Actions
+2. **Etapa 5:** Swagger completo, meta de cobertura no Jacoco, CI no GitHub Actions
    (o Testcontainers funciona no runner `ubuntu-latest`).

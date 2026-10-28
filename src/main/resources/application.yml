@@ -61,6 +61,8 @@ pix:
   cidade: ${PIX_CIDADE:SAO PAULO}
   chaves:
     limite-por-conta: ${PIX_LIMITE_CHAVES_POR_CONTA:5}
+  devolucao:
+    prazo: ${PIX_DEVOLUCAO_PRAZO:90d}
   ledger:
     base-url: ${LEDGER_BASE_URL:http://localhost:8081}
     # Usuário técnico (papel OPERADOR) na Ledger, via HTTP Basic. Sem padrão: obrigatório.
