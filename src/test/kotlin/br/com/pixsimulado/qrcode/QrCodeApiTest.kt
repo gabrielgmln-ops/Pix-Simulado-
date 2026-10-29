@@ -1,6 +1,6 @@
 package br.com.pixsimulado.qrcode
 
-import br.com.pixsimulado.IntegrationTest
+import br.com.pixsimulado.pagamento.LedgerSimuladaTest
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -16,23 +16,9 @@ import java.util.Base64
 import kotlin.test.assertEquals
 
 /** Fluxo completo: chave cadastrada -> QR gerado -> QR lido (texto e imagem). */
-class QrCodeApiTest : IntegrationTest() {
+class QrCodeApiTest : LedgerSimuladaTest() {
 
-    @Autowired lateinit var mvc: MockMvc
-    @Autowired lateinit var jdbc: JdbcTemplate
-    @Autowired lateinit var json: ObjectMapper
-
-    @BeforeEach
-    fun prepararChave() {
-        jdbc.execute("TRUNCATE chave_pix")
-        mvc.post("/api/v1/chaves") {
-            contentType = MediaType.APPLICATION_JSON
-            content = """
-                {"tipo": "EMAIL", "valor": "loja.sintetica@exemplo.com", "contaId": "0b8f4c2e-1d3a-4e5f-9a7b-6c5d4e3f2a10",
-                 "titular": {"nome": "Loja Sintética Ltda", "cpf": "12345678909"}}
-            """
-        }.andExpect { status { isCreated() } }
-    }
+    // A chave loja.sintetica@exemplo.com é cadastrada pela base (LedgerSimuladaTest).
 
     @Test
     fun `gera QR Code com payload valido e PNG que decodifica para o mesmo payload`() {

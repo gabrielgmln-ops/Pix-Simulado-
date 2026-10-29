@@ -56,6 +56,7 @@ abstract class LedgerSimuladaTest : IntegrationTest() {
         jdbc.execute("TRUNCATE chave_pix, pagamento_pix, devolucao_pix")
         mvc.post("/api/v1/chaves") {
             contentType = MediaType.APPLICATION_JSON
+            header(HttpHeaders.AUTHORIZATION, CRED_LOJA)
             content = """
                 {"tipo": "EMAIL", "valor": "$CHAVE_LOJA", "contaId": "$CONTA_LOJA",
                  "titular": {"nome": "Loja Sintética Ltda", "cpf": "12345678909"}}

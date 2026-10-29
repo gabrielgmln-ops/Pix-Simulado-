@@ -1,11 +1,13 @@
 package br.com.pixsimulado.chave
 
-import br.com.pixsimulado.IntegrationTest
+import br.com.pixsimulado.pagamento.LedgerSimuladaTest
 import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.matchesPattern
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import com.github.tomakehurst.wiremock.client.WireMock
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
@@ -22,17 +24,17 @@ import kotlin.test.assertEquals
  * Testes de ponta a ponta da API de chaves: HTTP -> serviço -> PostgreSQL real.
  * Todos os dados são sintéticos.
  */
-class ChavePixApiTest : IntegrationTest() {
-
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @Autowired
-    lateinit var jdbc: JdbcTemplate
+class ChavePixApiTest : LedgerSimuladaTest() {
 
     @BeforeEach
     fun limparBanco() {
         jdbc.execute("TRUNCATE chave_pix")
+        // Nesta classe, o titular de teste é dono de qualquer conta na Ledger simulada.
+        ledger.stubFor(
+            WireMock.get(WireMock.urlPathMatching("/api/v1/contas/.*")).atPriority(1)
+                .withBasicAuth(TITULAR, SENHA_TITULAR)
+                .willReturn(WireMock.aResponse().withStatus(200)),
+        )
     }
 
     // ===================== Cadastro =====================
@@ -158,6 +160,7 @@ class ChavePixApiTest : IntegrationTest() {
     fun `campos obrigatorios ausentes geram 400 com lista de erros por campo`() {
         mvc.post("/api/v1/chaves") {
             contentType = MediaType.APPLICATION_JSON
+            header(HttpHeaders.AUTHORIZATION, CRED_TITULAR)
             content = """{"titular": {}}"""
         }.andExpect {
             status { isBadRequest() }
@@ -179,7 +182,7 @@ class ChavePixApiTest : IntegrationTest() {
 
     @Test
     fun `listagem com contaId que nao e UUID gera 400`() {
-        mvc.get("/api/v1/chaves") { param("contaId", "conta-l") }.andExpect { status { isBadRequest() } }
+        mvc.get("/api/v1/chaves") { param("contaId", "conta-l"); header(HttpHeaders.AUTHORIZATION, CRED_TITULAR) }.andExpect { status { isBadRequest() } }
     }
 
     @Test
@@ -234,9 +237,9 @@ class ChavePixApiTest : IntegrationTest() {
         cadastrar(tipo = "EMAIL", valor = "um@exemplo.com", contaId = "conta-l")
         cadastrar(tipo = "EMAIL", valor = "dois@exemplo.com", contaId = "conta-l")
         cadastrar(tipo = "EMAIL", valor = "outra@exemplo.com", contaId = "conta-m", cpfTitular = CPF_B)
-        mvc.delete("/api/v1/chaves/{chave}", "dois@exemplo.com")
+        mvc.delete("/api/v1/chaves/{chave}", "dois@exemplo.com") { header(HttpHeaders.AUTHORIZATION, CRED_TITULAR) }
 
-        mvc.get("/api/v1/chaves") { param("contaId", conta("conta-l").toString()) }.andExpect {
+        mvc.get("/api/v1/chaves") { param("contaId", conta("conta-l").toString()); header(HttpHeaders.AUTHORIZATION, CRED_TITULAR) }.andExpect {
             status { isOk() }
             jsonPath("$", hasSize<Any>(1))
             jsonPath("$[0].valor") { value("um@exemplo.com") }
@@ -249,7 +252,7 @@ class ChavePixApiTest : IntegrationTest() {
     fun `exclusao e logica - preserva o registro e libera o valor para novo cadastro`() {
         cadastrar(tipo = "EMAIL", valor = "migra@exemplo.com", contaId = "conta-antiga", cpfTitular = CPF_A)
 
-        mvc.delete("/api/v1/chaves/{chave}", "migra@exemplo.com").andExpect { status { isNoContent() } }
+        mvc.delete("/api/v1/chaves/{chave}", "migra@exemplo.com") { header(HttpHeaders.AUTHORIZATION, CRED_TITULAR) }.andExpect { status { isNoContent() } }
         mvc.get("/api/v1/chaves/{chave}", "migra@exemplo.com").andExpect { status { isNotFound() } }
 
         // Portabilidade simplificada: a mesma chave em outra conta, de outro titular.
@@ -263,7 +266,7 @@ class ChavePixApiTest : IntegrationTest() {
 
     @Test
     fun `excluir chave inexistente devolve 404`() {
-        mvc.delete("/api/v1/chaves/{chave}", "ninguem@exemplo.com").andExpect { status { isNotFound() } }
+        mvc.delete("/api/v1/chaves/{chave}", "ninguem@exemplo.com") { header(HttpHeaders.AUTHORIZATION, CRED_TITULAR) }.andExpect { status { isNotFound() } }
     }
 
     // ===================== Apoio =====================
@@ -273,8 +276,10 @@ class ChavePixApiTest : IntegrationTest() {
         valor: String?,
         contaId: String = "conta-0001",
         cpfTitular: String = CPF_A,
+        credencial: String? = CRED_TITULAR,
     ): ResultActionsDsl = mvc.post("/api/v1/chaves") {
         contentType = MediaType.APPLICATION_JSON
+        credencial?.let { header(HttpHeaders.AUTHORIZATION, it) }
         val campoValor = valor?.let { "\"valor\": \"$it\"," } ?: ""
         content = """
             {
@@ -289,7 +294,55 @@ class ChavePixApiTest : IntegrationTest() {
     /** Converte um rótulo legível ("conta-a") num UUID fixo, como os ids da Ledger. */
     private fun conta(rotulo: String): UUID = UUID.nameUUIDFromBytes(rotulo.toByteArray())
 
+    // ===================== Controle de acesso (sequestro de chave) =====================
+
+    @Test
+    fun `cadastrar chave sem credencial gera 401`() {
+        cadastrar(tipo = "EMAIL", valor = "sem@exemplo.com", credencial = null).andExpect {
+            status { isUnauthorized() }
+            jsonPath("$.codigo") { value("NAO_AUTENTICADO") }
+        }
+    }
+
+    @Test
+    fun `cadastrar chave na conta de outro titular gera 403`() {
+        // O intruso não é dono de conta-0001 na Ledger simulada (fallback 404 = negado).
+        cadastrar(tipo = "EMAIL", valor = "golpe@exemplo.com", credencial = CRED_INTRUSO).andExpect {
+            status { isForbidden() }
+            jsonPath("$.codigo") { value("ACESSO_NEGADO") }
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM chave_pix", Int::class.java))
+    }
+
+    @Test
+    fun `terceiro nao consegue excluir a chave alheia para sequestra-la`() {
+        cadastrar(tipo = "EMAIL", valor = "loja-alvo@exemplo.com").andExpect { status { isCreated() } }
+
+        mvc.delete("/api/v1/chaves/{chave}", "loja-alvo@exemplo.com") { header(HttpHeaders.AUTHORIZATION, CRED_INTRUSO) }
+            .andExpect { status { isForbidden() } }
+        mvc.delete("/api/v1/chaves/{chave}", "loja-alvo@exemplo.com").andExpect { status { isUnauthorized() } }
+
+        // A chave continua ativa e apontando para a conta original.
+        mvc.get("/api/v1/chaves/{chave}", "loja-alvo@exemplo.com").andExpect {
+            status { isOk() }
+            jsonPath("$.contaId") { value(conta("conta-0001").toString()) }
+        }
+    }
+
+    @Test
+    fun `listar chaves de conta alheia gera 403 e a consulta de uma chave segue publica`() {
+        cadastrar(tipo = "EMAIL", valor = "publica@exemplo.com")
+
+        mvc.get("/api/v1/chaves") { param("contaId", conta("conta-0001").toString()); header(HttpHeaders.AUTHORIZATION, CRED_INTRUSO) }
+            .andExpect { status { isForbidden() } }
+        mvc.get("/api/v1/chaves/{chave}", "publica@exemplo.com").andExpect { status { isOk() } }
+    }
+
     companion object {
+        const val TITULAR = "titular-teste"
+        const val SENHA_TITULAR = "senha-titular"
+        val CRED_TITULAR = LedgerSimuladaTest.basic(TITULAR, SENHA_TITULAR)
+
         // CPFs sintéticos com dígitos verificadores válidos.
         const val CPF_A = "12345678909"
         const val CPF_B = "52998224725"

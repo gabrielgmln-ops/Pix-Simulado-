@@ -309,6 +309,7 @@ class PagamentoPixApiTest : LedgerSimuladaTest() {
 
     @Test
     fun `credencial que nao e Basic gera 401 sem consultar a Ledger`() {
+        ledger.resetRequests() // o setup já consultou a Ledger ao cadastrar a chave da loja
         pagar(novoEndToEndId(), chave = CHAVE_LOJA, valor = "1.00", credencial = "Bearer abc").andExpect {
             status { isUnauthorized() }
         }

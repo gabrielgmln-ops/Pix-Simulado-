@@ -41,7 +41,7 @@ class OpenApiContratoTest : IntegrationTest() {
     }
 
     @Test
-    fun `HTTP Basic e exigido so em pagamentos e devolucoes`() {
+    fun `HTTP Basic e exigido onde ha dono, e so ai`() {
         assertEquals("basic", api["components"]["securitySchemes"][OpenApiConfig.BASIC]["scheme"].asText())
         assertFalse(api.has("security"), "não deve haver exigência global de autenticação")
 
@@ -50,10 +50,13 @@ class OpenApiContratoTest : IntegrationTest() {
             "get" to "/api/v1/pagamentos/{endToEndId}",
             "post" to "/api/v1/pagamentos/{endToEndId}/devolucoes",
             "get" to "/api/v1/pagamentos/{endToEndId}/devolucoes",
+            "post" to "/api/v1/chaves",
+            "get" to "/api/v1/chaves",
+            "delete" to "/api/v1/chaves/{chave}",
         ).forEach { (metodo, rota) -> assertTrue(exigeBasic(metodo, rota), "$metodo $rota deveria exigir basicAuth") }
 
         listOf(
-            "post" to "/api/v1/chaves",
+            "get" to "/api/v1/chaves/{chave}",
             "post" to "/api/v1/qrcodes",
             "post" to "/api/v1/pagamentos/end-to-end-id",
         ).forEach { (metodo, rota) -> assertFalse(exigeBasic(metodo, rota), "$metodo $rota não deveria exigir basicAuth") }

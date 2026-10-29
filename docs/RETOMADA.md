@@ -100,6 +100,17 @@ copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, 
     com usuários sintéticos): o README passou a usar variáveis, e as duas impressões digitais antigas
     foram para o `.gitleaksignore`.
 
+## Correção anti-sequestro de chave (29/10)
+
+- **Falha** (apontada pela revisão de segurança): `POST` e `DELETE /api/v1/chaves` não exigiam credencial.
+  Um atacante podia apagar a chave da loja e recadastrá-la na própria conta, desviando os Pix.
+- **Correção:** cadastrar, excluir e listar exigem HTTP Basic do dono da conta, conferido na Ledger
+  (401 ou 403). A consulta de uma chave segue pública, como no DICT.
+- **Testes:** 4 novos. Os testes de chaves e de QR Code passaram a herdar a `LedgerSimuladaTest`.
+- **Armadilha encontrada:** com o Docker parado, o Testcontainers pula os testes de integração, e o
+  cache do Gradle reaproveitava esse resultado vazio. Resolvido com `outputs.cacheIf { false }` no
+  `test`. A meta de cobertura derrubou o build e expôs o problema: a cobertura caiu para 27%.
+
 ## Pendências
 
 1. A Operação Cofre da Ledger (HTTP Basic, dono por conta) **continua sem commit** no

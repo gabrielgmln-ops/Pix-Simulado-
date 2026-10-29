@@ -32,6 +32,7 @@ JUnit 5 · Testcontainers · Docker Compose · GitHub Actions
 | Devolver sem apagar o histórico | Lançamento inverso; `valorDevolvido` = soma das devoluções, como o saldo derivado |
 | Devoluções simultâneas furando o valor pago | Lock no pagamento antes de somar; INCERTO conta no limite |
 | Alguém debitar a conta de outro (IDOR) | Titularidade conferida na Ledger com a credencial do próprio cliente |
+| Sequestro de chave (apagar e recadastrar na própria conta) | Escrita e listagem de chaves só pelo dono da conta |
 | Dinheiro | `BigDecimal` / `NUMERIC(19,2)`; fração de centavo é recusada, nunca arredondada |
 
 ## Como demonstrar em 5 minutos
@@ -44,7 +45,7 @@ export CLIENTE_USUARIO=... CLIENTE_SENHA=... LOJA_USUARIO=... LOJA_SENHA=...
 B=localhost:8082/api/v1
 
 # 1. A loja cadastra a chave e gera um QR Code de R$ 25,90
-curl -s -X POST $B/chaves -H 'Content-Type: application/json' -d '{"tipo":"EMAIL","valor":"loja@exemplo.com",
+curl -s -u "$LOJA_USUARIO:$LOJA_SENHA" -X POST $B/chaves -H 'Content-Type: application/json' -d '{"tipo":"EMAIL","valor":"loja@exemplo.com",
   "contaId":"<conta-da-loja>","titular":{"nome":"Loja Sintetica","cpf":"123.456.789-09"}}'
 QR=$(curl -s -X POST $B/qrcodes -H 'Content-Type: application/json' \
   -d '{"chave":"loja@exemplo.com","valor":25.90}' | jq -r .payload)
@@ -179,6 +180,8 @@ curl -i -u "$CLIENTE_USUARIO:$CLIENTE_SENHA" -X POST localhost:8082/api/v1/pagam
 
 **QR Code.** O payload é lido com a mesma rotina da Etapa 2, que confere o CRC. Se o QR traz valor, esse valor prevalece: informar outro dá `422 VALOR_QR_DIVERGENTE`. Se o QR não tem valor, o campo `valor` é obrigatório.
 
+**Chaves (anti-sequestro).** Cadastrar, excluir e listar chaves exigem HTTP Basic do **dono da conta**, conferido na Ledger: sem isso, um atacante apagaria a chave da loja e a recadastraria na própria conta, desviando os Pix. A consulta de uma chave segue pública, como no DICT.
+
 **Controle de acesso (anti-IDOR).** Pagar e consultar exigem **HTTP Basic do titular**, que é o mesmo usuário dele na Ledger.
 - **Pagamento:** antes de qualquer efeito, inclusive numa repetição, o Pix pergunta à Ledger, com a credencial do cliente, se ele enxerga a conta de origem (`GET /api/v1/contas/{id}`). A Ledger só mostra a um CLIENTE as próprias contas. As respostas possíveis são:
   - sem credencial ou credencial recusada: `401 NAO_AUTENTICADO`;
@@ -226,7 +229,7 @@ curl -i -u "$LOJA_USUARIO:$LOJA_SENHA" -X POST localhost:8082/api/v1/pagamentos/
 Sem Docker disponível, os testes de integração são **ignorados** (não falham).
 Relatório de cobertura: `build/reports/jacoco/test/html/index.html`.
 
-Estado em 28/10/2026: **197 testes verdes**, **96,4% de linhas** e **83,9% de ramos** cobertos.
+Estado em 29/10/2026: **201 testes verdes**, **96,4% de linhas** e **83,9% de ramos** cobertos.
 O `check` **falha** abaixo de 90% de linhas ou 80% de ramos (Jacoco).
 A Ledger é simulada por um WireMock de verdade, o que permite provocar timeouts reais.
 

@@ -18,7 +18,8 @@ import org.springframework.context.annotation.Configuration
  * Swagger UI: /swagger-ui.html  |  Especificação JSON: /v3/api-docs
  *
  * O esquema "basicAuth" é declarado aqui, mas exigido só nas operações que precisam
- * dele (pagamentos e devoluções, via @SecurityRequirement). Chaves e QR Code são públicos.
+ * dele (via @SecurityRequirement): pagamentos, devoluções e escrita/listagem de chaves.
+ * Consulta de uma chave e QR Code são públicos.
  */
 @Configuration
 class OpenApiConfig {
@@ -99,8 +100,9 @@ class OpenApiConfig {
 
             **Devoluções:** só o recebedor devolve, total ou parcialmente, em até 90 dias.
 
-            **Autenticação:** pagamentos e devoluções exigem HTTP Basic do titular (o mesmo usuário da Ledger).
-            Chaves e QR Code são públicos neste ambiente de estudo.
+            **Autenticação:** pagamentos, devoluções e cadastro/exclusão/listagem de chaves exigem HTTP Basic
+            do titular (o mesmo usuário da Ledger), que precisa ser dono da conta. A consulta de uma chave
+            (como no DICT) e o QR Code são públicos.
         """.trimIndent()
     }
 }

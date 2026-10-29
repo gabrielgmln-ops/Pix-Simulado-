@@ -87,6 +87,10 @@ allOpen {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Nunca reaproveitar o resultado do cache: sem Docker, o Testcontainers PULA os
+    // testes de integração, e o Gradle não enxerga o Docker como entrada da tarefa.
+    // Um run "verde" de outro dia, sem Docker, voltaria do cache como se valesse hoje.
+    outputs.cacheIf { false }
     // Ao final dos testes, gera automaticamente o relatório de cobertura.
     finalizedBy(tasks.jacocoTestReport)
 }
