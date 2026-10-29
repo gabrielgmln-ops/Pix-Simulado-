@@ -62,6 +62,13 @@ curl -s -u "$LOJA_USUARIO:$LOJA_SENHA" -X POST $B/pagamentos/$E2E/devolucoes -H 
 curl -s -u "$CLIENTE_USUARIO:$CLIENTE_SENHA" $B/pagamentos/$E2E | jq '{estado, valor, valorDevolvido}'
 ```
 
+### Teste de ponta a ponta contra a Ledger real
+
+`scripts/e2e-ledger-real.sh` executa o roteiro acima com contas novas e **16 verificações**:
+anti-IDOR e anti-sequestro de chave, pagamento por QR, idempotência devolvendo a mesma
+transação da Ledger, saldo insuficiente, devolução parcial e os saldos conferidos na
+própria Ledger a cada passo. Validado em 29/10/2026: 16 de 16.
+
 ## Como executar
 
 Pré-requisitos: JDK 21 e Docker.

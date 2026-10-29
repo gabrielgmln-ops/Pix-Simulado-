@@ -111,10 +111,20 @@ copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, 
   cache do Gradle reaproveitava esse resultado vazio. Resolvido com `outputs.cacheIf { false }` no
   `test`. A meta de cobertura derrubou o build e expôs o problema: a cobertura caiu para 27%.
 
+## Ponta a ponta contra a Ledger real (29/10)
+
+- Na Ledger: Operação Cofre commitada (`6a75cf4`) e seed opcional de um segundo cliente
+  (`SEED_CLIENTE2_*`, commit `a36a3af`). Os dois commits estão **só locais**: o Render ainda roda a
+  versão sem autenticação.
+- Usuários (todos pelo seed, com senhas só nos `.env`): `operador` (OPERADOR, usado pelo Pix em
+  `LEDGER_USUARIO`/`LEDGER_SENHA`), `cliente` (pagador) e `loja` (recebedora).
+- Portas: Ledger 8081 com Postgres 5432; Pix 8082 com Postgres **5433** (`DB_PORT` no `.env` do Pix).
+- `scripts/e2e-ledger-real.sh`: 16 de 16 verificações OK.
+
 ## Pendências
 
-1. A Operação Cofre da Ledger (HTTP Basic, dono por conta) **continua sem commit** no
-   `ledger-api`. Para testar de ponta a ponta contra a Ledger real, é preciso:
+1. ~~Ponta a ponta contra a Ledger real~~: feito em 29/10. Falta só publicar a Ledger nova
+   (push + Render). Itens originais, para referência:
    - commitar e subir a Ledger;
    - criar na Ledger um usuário OPERADOR para o Pix e usuários CLIENTE donos das contas;
    - criar contas e depositar saldo.
