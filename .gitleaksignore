@@ -1,0 +1,7 @@
+# Falsos positivos já publicados no histórico (regra curl-auth-user).
+# São exemplos de "curl -u" no README com usuários SINTÉTICOS do ambiente de estudo
+# ("cliente-sintetico:senha" e "loja-sintetica:senha"), que não existem em lugar
+# nenhum. O README atual usa variáveis de ambiente; ignoramos só estas duas ocorrências
+# antigas, por impressão digital (commit:arquivo:regra:linha), e nada mais.
+29cef4c54c2fbc65e5695f1420d86d9cd8e516fa:README.md:curl-auth-user:115
+7745ef7966974287c08e696c7a716d725cbad4d1:README.md:curl-auth-user:161

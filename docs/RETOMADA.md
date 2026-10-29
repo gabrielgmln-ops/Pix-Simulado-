@@ -1,11 +1,11 @@
 # Pix Simulado - nota de retomada
 
-Atualizado em 28/10/2026, ao concluir a Etapa 4 no PC (Windows), vault `C:\SegundoCerebro`.
+Atualizado em 28/10/2026, ao concluir a Etapa 5 (projeto completo) no PC (Windows), vault `C:\SegundoCerebro`.
 
 ## Estado atual
 
-**Etapas 0 a 4 prontas.** 151 testes verdes (unitários + integração com PostgreSQL
-real via Testcontainers e a Ledger simulada por WireMock), cobertura de linhas de 96,3%.
+**Etapas 0 a 5 prontas: projeto completo.** 197 testes verdes (unitários + integração com PostgreSQL
+real via Testcontainers e a Ledger simulada por WireMock), 96,4% de linhas e 83,9% de ramos cobertos. O build falha abaixo de 90% de linhas ou de 80% de ramos.
 
 | Etapa | Escopo | Status | Commit |
 |---|---|---|---|
@@ -14,8 +14,8 @@ real via Testcontainers e a Ledger simulada por WireMock), cobertura de linhas d
 | 2 | QR Code: BR Code EMV + imagem PNG (ZXing) | ✅ | `b80c7e3` |
 | 3 | Transferência via Ledger, idempotência por EndToEndId | ✅ | `96c9aa2` |
 | 3+ | Correção anti-IDOR (dono da conta conferido na Ledger) | ✅ | `29cef4c` |
-| 4 | Devolução (lançamento inverso, original preservado) | ✅ | último do `git log` |
-| 5 | Swagger completo, cobertura, CI no GitHub Actions | ⏳ próxima | |
+| 4 | Devolução (lançamento inverso, original preservado) | ✅ | `7745ef7` |
+| 5 | Swagger completo, cobertura, CI no GitHub Actions | ✅ | último do `git log` |
 
 ## Restaurar o projeto
 
@@ -83,6 +83,23 @@ copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, 
   Pix de R$ 100 (liquidam exatamente 10). Mais 2 unitários do prefixo D. A Ledger simulada e os
   helpers foram para a base `LedgerSimuladaTest`.
 
+## Etapa 5 - Swagger, cobertura e CI
+
+- **Jacoco:** `jacocoTestCoverageVerification` ligado ao `check`, com meta de 90% de linhas e 80% de ramos.
+  - Os ramos estavam em 74,9%. Em vez de baixar a meta, escrevi testes do que faltava: a
+    classificação de respostas do `LedgerClient` (unitário com WireMock), as bordas do TLV e do
+    BR Code, e casos de devolução.
+- **Swagger:**
+  - o `basicAuth` é exigido só nas rotas de pagamento e devolução;
+  - todos os 4xx e 5xx usam o schema `ErroResponse` (RFC 9457 + `codigo`). O springdoc preenche
+    esses códigos com o `ProblemDetail` cru do advice, e por isso o customizador substitui sempre;
+  - os cabeçalhos `Location` e `Idempotent-Replayed` estão documentados;
+  - o `OpenApiContratoTest` trava esse contrato.
+- **CI:** jobs de testes e cobertura, imagem Docker e Gitleaks no histórico, com permissão `contents: read`.
+  - Rodei o Gitleaks localmente antes do push. Ele achou dois falsos positivos no README (`curl -u`
+    com usuários sintéticos): o README passou a usar variáveis, e as duas impressões digitais antigas
+    foram para o `.gitleaksignore`.
+
 ## Pendências
 
 1. A Operação Cofre da Ledger (HTTP Basic, dono por conta) **continua sem commit** no
@@ -90,5 +107,7 @@ copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, 
    - commitar e subir a Ledger;
    - criar na Ledger um usuário OPERADOR para o Pix e usuários CLIENTE donos das contas;
    - criar contas e depositar saldo.
-2. **Etapa 5:** Swagger completo, meta de cobertura no Jacoco, CI no GitHub Actions
-   (o Testcontainers funciona no runner `ubuntu-latest`).
+2. Ideias para uma v2 (fora do escopo):
+   - QR Code dinâmico (campo 25);
+   - outbox/Kafka para avisar o [[Motor Antifraude]] a cada Pix;
+   - limite noturno de valor (regra real do Pix).

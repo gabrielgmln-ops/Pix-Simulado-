@@ -1,5 +1,8 @@
 package br.com.pixsimulado.pagamento
 
+import br.com.pixsimulado.config.OpenApiConfig
+import io.swagger.v3.oas.annotations.headers.Header
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import br.com.pixsimulado.shared.domain.RecursoNaoEncontradoException
 import br.com.pixsimulado.shared.domain.RegraNegocioException
 import io.swagger.v3.oas.annotations.Parameter
@@ -44,9 +47,28 @@ class PagamentoPixController(
     fun novoEndToEndId(): EndToEndIdResponse = EndToEndIdResponse(service.novoEndToEndId().valor)
 
     @PostMapping
+    @SecurityRequirement(name = OpenApiConfig.BASIC)
     @Operation(summary = "Paga por chave ou por QR Code (idempotente por EndToEndId)")
-    @ApiResponse(responseCode = "201", description = "Pagamento liquidado na Ledger")
-    @ApiResponse(responseCode = "202", description = "Resultado ainda incerto (Ledger sem resposta); consulte depois")
+    @ApiResponse(responseCode = "201", description = "Pagamento liquidado na Ledger",
+        headers = [
+            Header(name = "Location", description = "URL para consultar a operação"),
+            Header(
+                name = PagamentoPixController.CABECALHO_REPETIDO,
+                description = "true quando a resposta é de um pedido já processado (repetição idempotente)",
+                schema = io.swagger.v3.oas.annotations.media.Schema(type = "boolean"),
+            ),
+        ],
+    )
+    @ApiResponse(responseCode = "202", description = "Resultado ainda incerto (Ledger sem resposta); consulte depois",
+        headers = [
+            Header(name = "Location", description = "URL para consultar a operação"),
+            Header(
+                name = PagamentoPixController.CABECALHO_REPETIDO,
+                description = "true quando a resposta é de um pedido já processado (repetição idempotente)",
+                schema = io.swagger.v3.oas.annotations.media.Schema(type = "boolean"),
+            ),
+        ],
+    )
     @ApiResponse(responseCode = "400", description = "Dados em formato inválido")
     @ApiResponse(responseCode = "401", description = "Credencial do titular ausente ou recusada")
     @ApiResponse(responseCode = "403", description = "A conta de origem não é do usuário autenticado")
@@ -84,6 +106,7 @@ class PagamentoPixController(
     }
 
     @GetMapping("/{endToEndId}")
+    @SecurityRequirement(name = OpenApiConfig.BASIC)
     @Operation(summary = "Consulta um pagamento pelo EndToEndId")
     @ApiResponse(responseCode = "200", description = "Pagamento encontrado (qualquer estado)")
     @ApiResponse(responseCode = "401", description = "Credencial do titular ausente ou recusada")

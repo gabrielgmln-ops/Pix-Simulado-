@@ -1,5 +1,8 @@
 package br.com.pixsimulado.pagamento
 
+import br.com.pixsimulado.config.OpenApiConfig
+import io.swagger.v3.oas.annotations.headers.Header
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import br.com.pixsimulado.shared.domain.RecursoNaoEncontradoException
 import br.com.pixsimulado.shared.domain.RegraNegocioException
 import io.swagger.v3.oas.annotations.Operation
@@ -118,9 +121,28 @@ class DevolucaoPixController(
     fun novoId(@PathVariable endToEndId: String): IdDevolucaoResponse = IdDevolucaoResponse(service.novoId().valor)
 
     @PostMapping
+    @SecurityRequirement(name = OpenApiConfig.BASIC)
     @Operation(summary = "Devolve um pagamento liquidado (idempotente pelo id da devolução)")
-    @ApiResponse(responseCode = "201", description = "Devolução liquidada na Ledger")
-    @ApiResponse(responseCode = "202", description = "Resultado ainda incerto; consulte depois")
+    @ApiResponse(responseCode = "201", description = "Devolução liquidada na Ledger",
+        headers = [
+            Header(name = "Location", description = "URL para consultar a operação"),
+            Header(
+                name = PagamentoPixController.CABECALHO_REPETIDO,
+                description = "true quando a resposta é de um pedido já processado (repetição idempotente)",
+                schema = io.swagger.v3.oas.annotations.media.Schema(type = "boolean"),
+            ),
+        ],
+    )
+    @ApiResponse(responseCode = "202", description = "Resultado ainda incerto; consulte depois",
+        headers = [
+            Header(name = "Location", description = "URL para consultar a operação"),
+            Header(
+                name = PagamentoPixController.CABECALHO_REPETIDO,
+                description = "true quando a resposta é de um pedido já processado (repetição idempotente)",
+                schema = io.swagger.v3.oas.annotations.media.Schema(type = "boolean"),
+            ),
+        ],
+    )
     @ApiResponse(responseCode = "401", description = "Credencial ausente ou recusada")
     @ApiResponse(responseCode = "403", description = "Só o recebedor do pagamento pode devolvê-lo")
     @ApiResponse(responseCode = "404", description = "Pagamento não encontrado")
@@ -158,6 +180,7 @@ class DevolucaoPixController(
     }
 
     @GetMapping
+    @SecurityRequirement(name = OpenApiConfig.BASIC)
     @Operation(summary = "Lista as devoluções de um pagamento")
     @ApiResponse(responseCode = "200", description = "Devoluções em ordem de criação (pode ser vazia)")
     @ApiResponse(responseCode = "404", description = "Pagamento não encontrado (ou de terceiros)")

@@ -285,6 +285,38 @@ class DevolucaoPixApiTest : LedgerSimuladaTest() {
     }
 
     @Test
+    fun `identificador de devolucao de outra instituicao gera 422`() {
+        val e2e = pagamentoLiquidado("100.00")
+        devolver(e2e, "D12345678202610281530aBcDeFgHiJk", valor = "10.00").andExpect {
+            status { isUnprocessableEntity() }
+            jsonPath("$.codigo") { value("ID_DEVOLUCAO_DE_OUTRA_INSTITUICAO") }
+        }
+    }
+
+    @Test
+    fun `identificador de devolucao com mais de 24 horas gera 422`() {
+        val e2e = pagamentoLiquidado("100.00")
+        devolver(e2e, "D99999999202001010000aBcDeFgHiJk", valor = "10.00").andExpect {
+            status { isUnprocessableEntity() }
+            jsonPath("$.codigo") { value("ID_DEVOLUCAO_EXPIRADO") }
+        }
+    }
+
+    @Test
+    fun `repetir uma devolucao INCERTA consulta a Ledger e liquida`() {
+        val e2e = pagamentoLiquidado("100.00")
+        devolucaoNaLedger(503, """{"title": "Indisponivel"}""")
+        val id = novoIdDevolucao(e2e)
+        devolver(e2e, id, valor = "10.00").andExpect { status { isAccepted() } }
+
+        devolucaoNaLedger(201, transacaoLedger(DEVOLUCAO_LEDGER_ID))
+        devolver(e2e, id, valor = "10.00").andExpect {
+            status { isCreated() }
+            header { string(PagamentoPixController.CABECALHO_REPETIDO, "true") }
+        }
+    }
+
+    @Test
     fun `devolucao de pagamento inexistente gera 404`() {
         devolver("E99999999202610281530aBcDeFgHiJk", "D99999999202610281530aBcDeFgHiJk", valor = "1.00").andExpect {
             status { isNotFound() }

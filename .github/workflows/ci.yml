@@ -1,0 +1,95 @@
+# ============================================================================
+# CI do Pix Simulado (Etapa 5)
+#
+#   build     -> compila, roda os testes (PostgreSQL real via Testcontainers, Ledger
+#                simulada via WireMock) e aplica a meta de cobertura do Jacoco.
+#   imagem    -> garante que o Dockerfile continua construindo (nada é publicado).
+#   segredos  -> Gitleaks no histórico inteiro: nenhuma senha ou chave pode entrar no Git.
+#
+# Permissões mínimas: o token do workflow só lê o repositório.
+# ============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Um push novo na mesma branch cancela o run anterior, que ficou obsoleto.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Testes e cobertura
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Gradle com cache
+        uses: gradle/actions/setup-gradle@v4
+
+      # "check" = testes + meta de cobertura (90% linhas, 80% ramos).
+      # O Docker já vem instalado no runner: o Testcontainers sobe o PostgreSQL sozinho.
+      - name: Build
+        run: ./gradlew check --no-daemon --console=plain
+
+      - name: Resumo da cobertura
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import re, pathlib
+          xml = pathlib.Path("build/reports/jacoco/test/jacocoTestReport.xml")
+          if not xml.exists():
+              print("Relatório de cobertura não gerado.")
+          else:
+              s = xml.read_text()
+              print("| Métrica | Cobertura | Meta |\n|---|---|---|")
+              for nome, tipo, meta in [("Linhas", "LINE", "90%"), ("Ramos", "BRANCH", "80%")]:
+                  falta, ok = map(int, re.findall(rf'<counter type="{tipo}" missed="(\d+)" covered="(\d+)"/>', s)[-1])
+                  print(f"| {nome} | {ok * 100 / (falta + ok):.1f}% | {meta} |")
+          PY
+
+      - name: Relatórios de teste e cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios
+          path: |
+            build/reports/tests/test
+            build/reports/jacoco/test
+          retention-days: 14
+
+  imagem:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build --tag pix-simulado:ci .
+
+  segredos:
+    name: Varredura de segredos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # histórico completo: um segredo apagado depois ainda vazou
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

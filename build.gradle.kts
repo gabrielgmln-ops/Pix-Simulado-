@@ -99,6 +99,32 @@ tasks.jacocoTestReport {
     }
 }
 
+// Meta de cobertura (Etapa 5): o build FALHA se cair abaixo dela, no PC e no CI.
+// Fica abaixo do valor atual de propósito: barra regressão sem travar refatorações.
+// O main() fica de fora: não tem lógica, só sobe o Spring.
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+    classDirectories.setFrom(
+        files(classDirectories.files.map { fileTree(it) { exclude("**/PixSimuladoApplicationKt.class") } }),
+    )
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                minimum = "0.90".toBigDecimal()
+            }
+            limit {
+                counter = "BRANCH"
+                minimum = "0.80".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
+}
+
 // Jar "plain" (sem dependências) não é útil aqui; mantemos apenas o bootJar executável.
 tasks.jar {
     enabled = false

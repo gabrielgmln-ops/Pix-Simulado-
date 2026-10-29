@@ -1,5 +1,7 @@
 # Pix Simulado
 
+[![CI](https://github.com/gabrielgmln-ops/Pix-Simulado-/actions/workflows/ci.yml/badge.svg)](https://github.com/gabrielgmln-ops/Pix-Simulado-/actions/workflows/ci.yml)
+
 Serviço de pagamentos instantâneos **simulado**, inspirado no arranjo Pix, que usa a
 **Ledger API** como motor de saldo. Projeto de estudo: dados sintéticos, sem
 cadastro próprio de usuários (a autenticação é a da Ledger) e sem integração real com o Banco Central.
@@ -18,7 +20,46 @@ JUnit 5 · Testcontainers · Docker Compose · GitHub Actions
 | 2 | Geração e leitura de QR Code (payload EMV simplificado) | ✅ |
 | 3 | Transferência instantânea via Ledger com idempotência por EndToEndId | ✅ |
 | 4 | Devolução (lançamento inverso, original preservado) | ✅ |
-| 5 | Swagger completo, testes, cobertura e CI | ⏳ |
+| 5 | Swagger completo, testes, cobertura e CI | ✅ |
+
+## Decisões de arquitetura (resumo para entrevista)
+
+| Problema | Decisão |
+|----------|---------|
+| Cliente reenvia o pedido após um timeout | Idempotência pelo EndToEndId: mesma resposta, nenhum novo débito |
+| Duas requisições iguais no mesmo milissegundo | `INSERT ... ON CONFLICT DO NOTHING` na PK + `SELECT ... FOR UPDATE` |
+| A Ledger não respondeu: debitou ou não? | Estado `INCERTO` + reenvio com a **mesma** `Idempotency-Key`; nunca "falha" |
+| Devolver sem apagar o histórico | Lançamento inverso; `valorDevolvido` = soma das devoluções, como o saldo derivado |
+| Devoluções simultâneas furando o valor pago | Lock no pagamento antes de somar; INCERTO conta no limite |
+| Alguém debitar a conta de outro (IDOR) | Titularidade conferida na Ledger com a credencial do próprio cliente |
+| Dinheiro | `BigDecimal` / `NUMERIC(19,2)`; fração de centavo é recusada, nunca arredondada |
+
+## Como demonstrar em 5 minutos
+
+Com a Ledger API na porta 8081, um usuário OPERADOR para o Pix e dois clientes
+com contas e saldo (a loja dona da chave):
+
+```bash
+export CLIENTE_USUARIO=... CLIENTE_SENHA=... LOJA_USUARIO=... LOJA_SENHA=...
+B=localhost:8082/api/v1
+
+# 1. A loja cadastra a chave e gera um QR Code de R$ 25,90
+curl -s -X POST $B/chaves -H 'Content-Type: application/json' -d '{"tipo":"EMAIL","valor":"loja@exemplo.com",
+  "contaId":"<conta-da-loja>","titular":{"nome":"Loja Sintetica","cpf":"123.456.789-09"}}'
+QR=$(curl -s -X POST $B/qrcodes -H 'Content-Type: application/json' \
+  -d '{"chave":"loja@exemplo.com","valor":25.90}' | jq -r .payload)
+
+# 2. O cliente paga o QR; repetir o mesmo comando devolve Idempotent-Replayed: true
+E2E=$(curl -s -X POST $B/pagamentos/end-to-end-id | jq -r .endToEndId)
+curl -i -u "$CLIENTE_USUARIO:$CLIENTE_SENHA" -X POST $B/pagamentos -H 'Content-Type: application/json' \
+  -d "{\"endToEndId\":\"$E2E\",\"contaOrigemId\":\"<conta-do-cliente>\",\"qrPayload\":\"$QR\"}"
+
+# 3. A loja devolve R$ 5,00; o pagamento original continua intacto
+ID=$(curl -s -X POST $B/pagamentos/$E2E/devolucoes/id | jq -r .idDevolucao)
+curl -s -u "$LOJA_USUARIO:$LOJA_SENHA" -X POST $B/pagamentos/$E2E/devolucoes -H 'Content-Type: application/json' \
+  -d "{\"idDevolucao\":\"$ID\",\"valor\":5.00,\"motivo\":\"MD06\"}"
+curl -s -u "$CLIENTE_USUARIO:$CLIENTE_SENHA" $B/pagamentos/$E2E | jq '{estado, valor, valorDevolvido}'
+```
 
 ## Como executar
 
@@ -112,7 +153,7 @@ O payload segue o padrão EMV (TLV) do BR Code estático. Os campos 00, 26 (GUI 
 
 ```bash
 E2E=$(curl -s -X POST localhost:8082/api/v1/pagamentos/end-to-end-id | jq -r .endToEndId)
-curl -i -u cliente-sintetico:senha -X POST localhost:8082/api/v1/pagamentos -H 'Content-Type: application/json' -d "{
+curl -i -u "$CLIENTE_USUARIO:$CLIENTE_SENHA" -X POST localhost:8082/api/v1/pagamentos -H 'Content-Type: application/json' -d "{
   \"endToEndId\": \"$E2E\", \"contaOrigemId\": \"7d1e2f3a-4b5c-4d6e-8f70-9a1b2c3d4e5f\",
   \"chave\": \"loja.sintetica@exemplo.com\", \"valor\": 25.90, \"descricao\": \"Pedido 123\"
 }"
@@ -159,7 +200,7 @@ Códigos estáveis da etapa: `END_TO_END_ID_INVALIDO`, `END_TO_END_ID_DE_OUTRA_I
 
 ```bash
 ID=$(curl -s -X POST localhost:8082/api/v1/pagamentos/$E2E/devolucoes/id | jq -r .idDevolucao)
-curl -i -u loja-sintetica:senha -X POST localhost:8082/api/v1/pagamentos/$E2E/devolucoes \
+curl -i -u "$LOJA_USUARIO:$LOJA_SENHA" -X POST localhost:8082/api/v1/pagamentos/$E2E/devolucoes \
   -H 'Content-Type: application/json' -d "{\"idDevolucao\": \"$ID\", \"valor\": 10.00, \"motivo\": \"MD06\"}"
 ```
 
@@ -179,14 +220,25 @@ curl -i -u loja-sintetica:senha -X POST localhost:8082/api/v1/pagamentos/$E2E/de
 ## Testes
 
 ```bash
-./gradlew test    # unitários + integração (PostgreSQL real via Testcontainers, Ledger via WireMock)
+./gradlew check   # testes (PostgreSQL real via Testcontainers, Ledger via WireMock) + meta de cobertura
 ```
 
 Sem Docker disponível, os testes de integração são **ignorados** (não falham).
 Relatório de cobertura: `build/reports/jacoco/test/html/index.html`.
 
-Estado em 28/10/2026: **151 testes verdes** e **96,3% de cobertura de linhas**.
+Estado em 28/10/2026: **197 testes verdes**, **96,4% de linhas** e **83,9% de ramos** cobertos.
+O `check` **falha** abaixo de 90% de linhas ou 80% de ramos (Jacoco).
 A Ledger é simulada por um WireMock de verdade, o que permite provocar timeouts reais.
+
+## Integração contínua
+
+O workflow `.github/workflows/ci.yml` roda a cada push e pull request na `main`, com token de permissão só de leitura:
+
+| Job | O que garante |
+|-----|---------------|
+| **Testes e cobertura** | `./gradlew check` no Ubuntu com JDK 21. O PostgreSQL real sobe pelo Testcontainers e a meta de cobertura é aplicada. Os relatórios ficam como artefato, e o resumo do job mostra a cobertura. |
+| **Imagem Docker** | O `Dockerfile` multi-estágio continua construindo. Nada é publicado. |
+| **Varredura de segredos** | Gitleaks no histórico inteiro. Os dois falsos positivos antigos (exemplos `curl -u` com usuários sintéticos) estão listados, com justificativa, no `.gitleaksignore`. |
 
 ## Configuração (variáveis de ambiente)
 
@@ -212,7 +264,8 @@ Segredos não têm valor padrão: se faltarem, a aplicação falha na inicializa
 - **Tempo**: `TIMESTAMPTZ` em UTC; o código obtém a hora por um `Clock` injetável.
 - **Imutabilidade financeira**: transações nunca são apagadas ou editadas; devolução gera lançamento inverso.
 - **Schema**: só o Flyway altera o banco (`ddl-auto: validate`); migrações aplicadas são imutáveis.
-- **Erros**: respostas no formato Problem Details (RFC 9457).
+- **Erros**: respostas no formato Problem Details (RFC 9457), documentadas no Swagger com o schema `ErroResponse`.
+- **Swagger**: o `basicAuth` é exigido só nas rotas de pagamento e devolução. Um teste (`OpenApiContratoTest`) trava o contrato publicado.
 
 ## Estrutura
 
