@@ -21,7 +21,7 @@ real via Testcontainers e a Ledger simulada por WireMock), 96,4% de linhas e 83,
 
 ```powershell
 # Atenção ao hífen no fim do nome do repositório.
-git clone https://github.com/gabrielgmln-ops/Pix-Simulado-.git pix-simulado
+git clone https://github.com/gabrielgmln-ops/pix-simulado.git pix-simulado
 cd pix-simulado
 copy .env.example .env     # ajustar DB_PASSWORD, LEDGER_USUARIO, LEDGER_SENHA, SERVER_PORT=8082
 .\gradlew.bat test         # requer JDK 21 e Docker Desktop aberto

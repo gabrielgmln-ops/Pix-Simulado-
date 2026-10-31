@@ -1,6 +1,6 @@
 # Pix Simulado
 
-[![CI](https://github.com/gabrielgmln-ops/Pix-Simulado-/actions/workflows/ci.yml/badge.svg)](https://github.com/gabrielgmln-ops/Pix-Simulado-/actions/workflows/ci.yml)
+[![CI](https://github.com/gabrielgmln-ops/pix-simulado/actions/workflows/ci.yml/badge.svg)](https://github.com/gabrielgmln-ops/pix-simulado/actions/workflows/ci.yml)
 
 Serviço de pagamentos instantâneos **simulado**, inspirado no arranjo Pix, que usa a
 **Ledger API** como motor de saldo. Projeto de estudo: dados sintéticos, sem
